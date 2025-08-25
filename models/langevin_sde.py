@@ -184,15 +184,11 @@ class LangevinSDEContiformer(nn.Module):
         # 2. 使用原始特征编码作为SDE的基础状态
         encoded_features = self.feature_encoder(time_series)  # (batch, seq_len, hidden_channels)
         
-        # 3. SDE建模整个时间序列 - 改进版本避免时间序列问题
+        # 3. SDE建模整个时间序列 - 生成连续的SDE轨迹
         sde_trajectory = []
         
         # 从第一个时间点开始，逐步求解SDE
         current_state = encoded_features[:, 0]  # (batch, hidden_channels) 初始状态
-        
-        # 设置最大连续求解步数，防止递归过深
-        max_consecutive_steps = 50
-        consecutive_steps = 0
         
         for i in range(seq_len):
             # 当前时间点
@@ -201,50 +197,29 @@ class LangevinSDEContiformer(nn.Module):
             if i == 0:
                 # 第一个时间点直接使用初始状态
                 sde_output = current_state
-                consecutive_steps = 0
             else:
                 # 从上一个状态求解到当前时间
                 prev_time = times[:, i-1]
                 
-                # 确保时间严格递增，避免padding零值导致的问题
-                prev_time_val = prev_time[0].item()
-                current_time_val = current_time[0].item()
+                # 创建时间序列用于SDE求解
+                t_solve = torch.stack([prev_time[0], current_time[0]])  # 使用第一个样本的时间作为参考
                 
-                # 检查是否需要跳过SDE求解
-                should_skip_sde = (
-                    current_time_val <= prev_time_val or  # 时间不递增
-                    prev_time_val <= 0 or current_time_val <= 0 or  # 包含零值(padding)
-                    consecutive_steps >= max_consecutive_steps or  # 连续步数过多
-                    abs(current_time_val - prev_time_val) < 1e-6  # 时间差太小
-                )
-                
-                if should_skip_sde:
-                    # 使用编码特征，重置计数器
-                    sde_output = encoded_features[:, i]
-                    consecutive_steps = 0
-                else:
-                    # 创建时间序列用于SDE求解 - 确保严格递增
-                    t_solve = torch.stack([prev_time[0], current_time[0]])
+                try:
+                    # 求解SDE从prev_state到当前时间
+                    ys = torchsde.sdeint(
+                        sde=self.sde_model,
+                        y0=current_state,  # 使用当前状态作为初始值
+                        ts=t_solve,
+                        method=self.sde_method,
+                        dt=self.dt,
+                        rtol=self.rtol,
+                        atol=self.atol
+                    )
+                    sde_output = ys[-1]  # 取最终时间的结果
                     
-                    try:
-                        # 求解SDE从prev_state到当前时间
-                        ys = torchsde.sdeint(
-                            sde=self.sde_model,
-                            y0=current_state,  # 使用当前状态作为初始值
-                            ts=t_solve,
-                            method=self.sde_method,
-                            dt=min(self.dt, abs(current_time_val - prev_time_val) / 10),  # 动态调整步长
-                            rtol=self.rtol,
-                            atol=self.atol,
-                            options={'max_num_steps': 100}  # 限制最大步数
-                        )
-                        sde_output = ys[-1]  # 取最终时间的结果
-                        consecutive_steps += 1
-                        
-                    except Exception as e:
-                        print(f"SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
-                        sde_output = encoded_features[:, i]
-                        consecutive_steps = 0
+                except Exception as e:
+                    print(f"SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
+                    sde_output = encoded_features[:, i]
             
             # 更新当前状态为SDE输出
             current_state = sde_output
@@ -287,9 +262,6 @@ class LangevinSDEContiformer(nn.Module):
             combined_weights = 0.3 * weight.to(logits.device) + 0.7 * dynamic_weights
         else:
             combined_weights = dynamic_weights
-        
-        # 确保权重无梯度
-        combined_weights = combined_weights.detach()
         
         # 1. 更强的Focal Loss
         ce_loss = F.cross_entropy(scaled_logits, labels, weight=combined_weights, reduction='none')
