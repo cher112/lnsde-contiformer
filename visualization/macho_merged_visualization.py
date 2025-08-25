@@ -10,7 +10,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
 def load_merged_log():
     """加载合并后的MACHO log文件"""
-    log_path = "/root/autodl-tmp/lnsde+contiformer/results/logs/MACHO_linear_noise_config1_merged.log"
+    log_path = "/root/autodl-tmp/lnsde+contiformer/results/logs/MACHO/MACHO_linear_noise_config1_merged.log"
     with open(log_path, 'r') as f:
         return json.load(f)
 
@@ -76,7 +76,7 @@ def create_training_curves(data):
     plt.tight_layout()
     
     # 保存图片
-    pics_dir = "/root/autodl-tmp/lnsde+contiformer/results/pics"
+    pics_dir = "/root/autodl-tmp/lnsde+contiformer/results/pics/MACHO"
     os.makedirs(pics_dir, exist_ok=True)
     plt.savefig(os.path.join(pics_dir, "macho_merged_training_curves.png"), dpi=300, bbox_inches='tight')
     print(f"训练曲线图已保存到: {pics_dir}/macho_merged_training_curves.png")
@@ -136,7 +136,7 @@ def create_class_performance_analysis(data):
     plt.tight_layout()
     
     # 保存图片
-    pics_dir = "/root/autodl-tmp/lnsde+contiformer/results/pics"
+    pics_dir = "/root/autodl-tmp/lnsde+contiformer/results/pics/MACHO"
     plt.savefig(os.path.join(pics_dir, "macho_class_performance_analysis.png"), dpi=300, bbox_inches='tight')
     print(f"类别性能分析图已保存到: {pics_dir}/macho_class_performance_analysis.png")
     
@@ -216,7 +216,7 @@ SDE Config: 1
     plt.tight_layout()
     
     # 保存图片
-    pics_dir = "/root/autodl-tmp/lnsde+contiformer/results/pics"
+    pics_dir = "/root/autodl-tmp/lnsde+contiformer/results/pics/MACHO"
     plt.savefig(os.path.join(pics_dir, "macho_training_summary.png"), dpi=300, bbox_inches='tight')
     print(f"训练总结图已保存到: {pics_dir}/macho_training_summary.png")
     

@@ -371,12 +371,14 @@ def setup_logging(log_dir, dataset_name, model_type, sde_config):
     from datetime import datetime
     import json
     
-    os.makedirs(log_dir, exist_ok=True)
+    # 在log_dir下创建数据集专用目录
+    dataset_log_dir = os.path.join(log_dir, dataset_name)
+    os.makedirs(dataset_log_dir, exist_ok=True)
     
     # 生成日志文件名
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_filename = f"{dataset_name}_{model_type}_config{sde_config}_{timestamp}.log"
-    log_path = os.path.join(log_dir, log_filename)
+    log_path = os.path.join(dataset_log_dir, log_filename)
     
     # 初始化日志数据结构
     log_data = {

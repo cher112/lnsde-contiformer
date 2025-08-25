@@ -15,7 +15,11 @@
       "WebSearch",
       "Bash(git clone:*)",
       "Read(//root/autodl-tmp/PhysioPro/**)",
-      "mcp__context7__get-library-docs"
+      "mcp__context7__get-library-docs",
+      "Bash(for file in chinese_analysis.py corrected_imbalance_analysis.py final_analysis.py four_metrics_analysis.py)",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(grep:*)",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": [],

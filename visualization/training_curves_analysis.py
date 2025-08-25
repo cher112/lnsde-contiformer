@@ -49,9 +49,9 @@ def load_training_data():
     """加载三个数据集的训练数据"""
     
     # 文件路径
-    asas_file = "/root/autodl-tmp/lnsde+contiformer/results/logs/ASAS_linear_noise_config1_20250824_000718.json"
-    linear_file = "/root/autodl-tmp/lnsde+contiformer/results/logs/LINEAR_linear_noise_config1_20250824_140843.log"
-    macho_file = "/root/autodl-tmp/lnsde+contiformer/results/logs/MACHO_linear_noise_config1_20250824_135530.log"
+    asas_file = "/root/autodl-tmp/lnsde+contiformer/results/logs/ASAS/ASAS_linear_noise_config1_20250824_000718.json"
+    linear_file = "/root/autodl-tmp/lnsde+contiformer/results/logs/LINEAR/LINEAR_linear_noise_config1_20250824_140843.log"
+    macho_file = "/root/autodl-tmp/lnsde+contiformer/results/logs/MACHO/MACHO_linear_noise_config1_20250824_135530.log"
     
     datasets = {}
     

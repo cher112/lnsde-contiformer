@@ -172,9 +172,9 @@ def print_summary_table(datasets_data):
 def main():
     # Define log file paths - use JSON files for ASAS (more recent data)
     log_files = {
-        'LINEAR': '/root/autodl-tmp/lnsde+contiformer/results/logs/LINEAR_linear_noise_config1_20250824_140843.log',
-        'ASAS': '/root/autodl-tmp/lnsde+contiformer/results/logs/ASAS_linear_noise_config1_20250824_000718.json',  # JSON has 98% accuracy
-        'MACHO': '/root/autodl-tmp/lnsde+contiformer/results/logs/MACHO_linear_noise_config1_20250824_135530.log'
+        'LINEAR': '/root/autodl-tmp/lnsde+contiformer/results/logs/LINEAR/LINEAR_linear_noise_config1_20250824_140843.log',
+        'ASAS': '/root/autodl-tmp/lnsde+contiformer/results/logs/ASAS/ASAS_linear_noise_config1_20250824_000718.json',  # JSON has 98% accuracy
+        'MACHO': '/root/autodl-tmp/lnsde+contiformer/results/logs/MACHO/MACHO_linear_noise_config1_20250824_135530.log'
     }
     
     # Load data from all datasets
@@ -191,7 +191,7 @@ def main():
         return
     
     # Create output directory if it doesn't exist
-    output_dir = '/root/autodl-tmp/lnsde+contiformer/results/pics'
+    output_dir = '/root/autodl-tmp/lnsde+contiformer/results/pics'  # 通用输出目录
     os.makedirs(output_dir, exist_ok=True)
     
     # Generate plots
