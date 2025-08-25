@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(pip install:*)",
+      "Bash(export:*)",
+      "Bash(source:*)",
+      "Bash(python:*)",
+      "mcp__ide__executeCode",
+      "Bash(conda activate:*)",
+      "Bash(conda info:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__zen__thinkdeep",
+      "mcp__zen__chat",
+      "WebSearch",
+      "Bash(git clone:*)",
+      "Read(//root/autodl-tmp/PhysioPro/**)",
+      "mcp__context7__get-library-docs"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "/tmp",
+      "/root/autodl-tmp"
+    ]
+  }
+}
