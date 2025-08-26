@@ -52,7 +52,7 @@ class TrainingManager:
                 self.device, self.args.model_type, self.dataset_config, self.scaler
             )
             
-            # 验证阶段
+            # 验证阶段 - 总是计算混淆矩阵
             val_loss, val_acc, val_class_acc, val_metrics = validate_epoch(
                 self.model, self.val_loader, self.criterion, 
                 self.device, self.args.model_type, self.dataset_config
@@ -60,17 +60,6 @@ class TrainingManager:
             
             # 检查是否是最佳模型
             is_best = val_acc > best_val_acc
-            
-            # 如果是最佳模型，重新验证以获取混淆矩阵
-            if is_best:
-                print("🎯 检测到最佳模型，重新验证以获取混淆矩阵...")
-                _, _, _, val_metrics_with_cm = validate_epoch(
-                    self.model, self.val_loader, self.criterion, 
-                    self.device, self.args.model_type, self.dataset_config, 
-                    compute_confusion=True
-                )
-                # 更新验证指标以包含混淆矩阵
-                val_metrics = val_metrics_with_cm
             
             epoch_time = time.time() - epoch_start_time
             

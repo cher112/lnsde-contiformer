@@ -35,7 +35,7 @@ def parse_args():
                        help='模型加载选项 (0:不加载, 1:加载最新, 2:加载最优)')
     
     # 数据相关 - 使用数字代表数据集
-    parser.add_argument('--dataset', type=int, default=2,
+    parser.add_argument('--dataset', type=int, default=3,
                        choices=[1, 2, 3],
                        help='数据集选择: 1=ASAS, 2=LINEAR, 3=MACHO')
     
