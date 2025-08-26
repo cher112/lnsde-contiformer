@@ -166,7 +166,7 @@ class LangevinSDEContiformer(nn.Module):
         
     def forward(self, time_series, times, mask=None):
         """
-        前向传播
+        前向传播 - 高效的批处理SDE求解版本
         Args:
             time_series: (batch, seq_len, input_dim) 光变曲线数据 [time, mag, errmag]
             times: (batch, seq_len) 时间戳
@@ -177,18 +177,15 @@ class LangevinSDEContiformer(nn.Module):
         """
         batch_size, seq_len = time_series.shape[:2]
         
-        # 1. 提取时间和mag数据用于SDE建模
-        time_data = time_series[:, :, 0]  # (batch, seq_len) 时间数据
-        mag_data = time_series[:, :, 1]   # (batch, seq_len) mag数据
-        
-        # 2. 使用原始特征编码作为SDE的基础状态
+        # 1. 使用原始特征编码作为SDE的基础状态
         encoded_features = self.feature_encoder(time_series)  # (batch, seq_len, hidden_channels)
         
-        # 3. SDE建模整个时间序列 - 生成连续的SDE轨迹
+        # 2. 高效的批处理SDE建模 - 类似Linear Noise SDE的方式
         sde_trajectory = []
         
         # 从第一个时间点开始，逐步求解SDE
         current_state = encoded_features[:, 0]  # (batch, hidden_channels) 初始状态
+        sde_solving_count = 0  # 统计实际进行SDE求解的步数
         
         for i in range(seq_len):
             # 当前时间点
@@ -201,45 +198,72 @@ class LangevinSDEContiformer(nn.Module):
                 # 从上一个状态求解到当前时间
                 prev_time = times[:, i-1]
                 
-                # 创建时间序列用于SDE求解
-                t_solve = torch.stack([prev_time[0], current_time[0]])  # 使用第一个样本的时间作为参考
+                # 使用mask来判断是否应该进行SDE求解
+                if mask is not None:
+                    # 检查当前批次中是否有有效的时间点
+                    current_valid = mask[:, i]  # (batch,) 当前时间点的mask
+                    prev_valid = mask[:, i-1]    # (batch,) 前一时间点的mask
+                    batch_has_valid = torch.any(current_valid & prev_valid)  # 是否有样本在两个时间点都有效
+                else:
+                    batch_has_valid = True
                 
-                try:
-                    # 求解SDE从prev_state到当前时间
-                    ys = torchsde.sdeint(
-                        sde=self.sde_model,
-                        y0=current_state,  # 使用当前状态作为初始值
-                        ts=t_solve,
-                        method=self.sde_method,
-                        dt=self.dt,
-                        rtol=self.rtol,
-                        atol=self.atol
-                    )
-                    sde_output = ys[-1]  # 取最终时间的结果
+                # 检查时间是否递增（使用第一个样本作为参考）
+                prev_time_val = prev_time[0].item()
+                current_time_val = current_time[0].item()
+                time_increasing = current_time_val > prev_time_val + 1e-8
+                
+                # 决定是否进行SDE求解
+                should_solve_sde = (
+                    batch_has_valid and 
+                    time_increasing and
+                    prev_time_val > 0 and 
+                    current_time_val > 0
+                )
+                
+                if should_solve_sde:
+                    t_solve = torch.stack([prev_time[0], current_time[0]])  # 使用第一个样本的时间作为参考
                     
-                except Exception as e:
-                    print(f"SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
+                    try:
+                        # 求解SDE - 批处理版本
+                        ys = torchsde.sdeint(
+                            sde=self.sde_model,
+                            y0=current_state,  # (batch, hidden_channels)
+                            ts=t_solve,
+                            method=self.sde_method,
+                            dt=self.dt,
+                            rtol=self.rtol,
+                            atol=self.atol
+                        )
+                        sde_output = ys[-1]  # (batch, hidden_channels) 取最终时间的结果
+                        sde_solving_count += 1
+                        
+                    except Exception as e:
+                        if sde_solving_count < 5:  # 只在前几次失败时打印
+                            print(f"Langevin SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
+                        sde_output = encoded_features[:, i]
+                else:
+                    # 使用编码特征
                     sde_output = encoded_features[:, i]
             
-            # 更新当前状态为SDE输出
+            # 更新当前状态
             current_state = sde_output
             sde_trajectory.append(sde_output)
         
-        # 4. 重组SDE轨迹为完整序列
+        # 3. 重组SDE轨迹为完整序列
         sde_features = torch.stack(sde_trajectory, dim=1)  # (batch, seq_len, hidden_channels)
         
-        # 5. 应用mask
+        # 4. 应用mask
         if mask is not None:
             sde_features = self.mask_processor.apply_mask(sde_features, mask)
         
-        # 6. ContiFormer处理整个SDE轨迹序列
+        # 5. ContiFormer处理整个SDE轨迹序列
         contiformer_out, pooled_features = self.contiformer(
             sde_features,  # 传入完整的SDE轨迹
             times, 
             mask
         )
         
-        # 7. 分类
+        # 6. 分类
         logits = self.classifier(pooled_features)
         
         return logits, sde_features
@@ -262,6 +286,9 @@ class LangevinSDEContiformer(nn.Module):
             combined_weights = 0.3 * weight.to(logits.device) + 0.7 * dynamic_weights
         else:
             combined_weights = dynamic_weights
+        
+        # 确保权重不需要梯度，避免梯度计算问题
+        combined_weights = combined_weights.detach()
         
         # 1. 更强的Focal Loss
         ce_loss = F.cross_entropy(scaled_logits, labels, weight=combined_weights, reduction='none')

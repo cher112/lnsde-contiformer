@@ -197,20 +197,6 @@ class LightCurveDataset(Dataset):
         # 更新有效长度
         actual_length = len(final_times)
         
-        # 如果数据太少，补充一些点
-        if actual_length < 10:
-            # 使用原始数据，但添加小的时间扰动确保递增
-            final_times = times[:len(times)]
-            final_mags = mags[:len(mags)]
-            final_errmags = errmags[:len(errmags)]
-            # 添加小的递增时间扰动
-            time_min, time_max = final_times.min(), final_times.max()
-            if time_max - time_min < 1e-6:  # 如果时间范围太小
-                final_times = np.linspace(0, 1, len(final_times), dtype=np.float32)
-            else:
-                final_times = np.sort(final_times) + np.arange(len(final_times)) * 1e-6
-            actual_length = len(final_times)
-        
         # Padding到固定长度，但保持mask信息
         max_len = len(times)
         padded_times = np.zeros(max_len, dtype=np.float32)
@@ -427,4 +413,4 @@ def create_dataloaders(data_path: str,
         pin_memory=True
     )
     
-    return train_loader, val_loader, test_loader, full_dataset.class_weights
+    return train_loader, val_loader, test_loader, full_dataset.num_classes

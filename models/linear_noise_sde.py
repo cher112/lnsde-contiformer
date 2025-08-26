@@ -205,12 +205,11 @@ class LinearNoiseSDEContiformer(nn.Module):
         # 稳定性监控
         self.stability_history = []
         
-    def forward(self, time_series, times, mask=None, return_stability_info=False):
+    def forward(self, time_series, mask=None, return_stability_info=False):
         """
-        前向传播
+        前向传播 - 高效的批处理SDE求解
         Args:
             time_series: (batch, seq_len, input_dim) 光变曲线数据 [time, mag, errmag]
-            times: (batch, seq_len) 时间戳
             mask: (batch, seq_len) mask, True表示有效位置
             return_stability_info: 是否返回稳定性信息
         Returns:
@@ -220,23 +219,19 @@ class LinearNoiseSDEContiformer(nn.Module):
         """
         batch_size, seq_len = time_series.shape[:2]
         
-        # 1. 提取时间和mag数据用于SDE建模
-        time_data = time_series[:, :, 0]  # (batch, seq_len) 时间数据
-        mag_data = time_series[:, :, 1]   # (batch, seq_len) mag数据
+        # 1. 提取时间数据用于SDE建模
+        times = time_series[:, :, 0]  # (batch, seq_len) 时间数据
         
         # 2. 使用原始特征编码作为SDE的基础状态
         encoded_features = self.feature_encoder(time_series)  # (batch, seq_len, hidden_channels)
         
-        # 3. SDE建模整个时间序列 - 改进版本避免递归深度问题
+        # 3. 高效的批处理SDE建模 - 优化版本，确保真正使用SDE求解
         sde_trajectory = []
         stability_info = []
         
         # 从第一个时间点开始，逐步求解SDE
         current_state = encoded_features[:, 0]  # (batch, hidden_channels) 初始状态
-        
-        # 设置最大连续求解步数，防止递归过深
-        max_consecutive_steps = 50
-        consecutive_steps = 0
+        sde_solving_count = 0  # 统计实际进行SDE求解的步数
         
         for i in range(seq_len):
             # 当前时间点
@@ -253,79 +248,59 @@ class LinearNoiseSDEContiformer(nn.Module):
             if i == 0:
                 # 第一个时间点直接使用初始状态
                 sde_output = current_state
-                consecutive_steps = 0
             else:
                 # 从上一个状态求解到当前时间
                 prev_time = times[:, i-1]
                 
-                # 创建时间序列用于SDE求解
-                # 确保时间严格递增，避免padding零值导致的问题
+                # 使用mask来判断是否应该进行SDE求解
+                if mask is not None:
+                    # 检查当前批次中是否有有效的时间点
+                    current_valid = mask[:, i]  # (batch,) 当前时间点的mask
+                    prev_valid = mask[:, i-1]    # (batch,) 前一时间点的mask
+                    batch_has_valid = torch.any(current_valid & prev_valid)  # 是否有样本在两个时间点都有效
+                else:
+                    batch_has_valid = True
+                
+                # 检查时间是否递增（使用第一个样本作为参考）
                 prev_time_val = prev_time[0].item()
                 current_time_val = current_time[0].item()
+                time_increasing = current_time_val > prev_time_val + 1e-6
                 
-                # 检查是否需要跳过SDE求解以避免递归深度问题
-                should_skip_sde = (
-                    current_time_val <= prev_time_val or  # 时间不递增
-                    prev_time_val <= 0 or current_time_val <= 0 or  # 包含零值
-                    consecutive_steps >= max_consecutive_steps or  # 连续步数过多
-                    abs(current_time_val - prev_time_val) < 1e-6  # 时间差太小
+                # 决定是否进行SDE求解
+                should_solve_sde = (
+                    batch_has_valid and 
+                    time_increasing and
+                    prev_time_val > 0 and 
+                    current_time_val > 0
                 )
                 
-                if should_skip_sde:
-                    # 使用编码特征，重置计数器
-                    sde_output = encoded_features[:, i]
-                    consecutive_steps = 0
-                else:
+                if should_solve_sde:
                     t_solve = torch.stack([prev_time[0], current_time[0]])  # 使用第一个样本的时间作为参考
                     
                     try:
-                        # 断开梯度连接以防止递归累积
-                        detached_state = current_state.detach().requires_grad_(True)
-                        
-                        # 求解SDE从prev_state到当前时间
-                        with torch.no_grad():
-                            # 先尝试无梯度求解以检测数值问题
-                            test_ys = torchsde.sdeint(
-                                sde=self.sde_model,
-                                y0=detached_state.detach(),
-                                ts=t_solve,
-                                method=self.sde_method,
-                                dt=min(self.dt, abs(current_time_val - prev_time_val) / 10),  # 动态调整步长
-                                rtol=self.rtol,
-                                atol=self.atol,
-                                options={'max_num_steps': 100}  # 限制最大步数
-                            )
-                        
-                        # 如果测试通过，进行带梯度的求解
+                        # 求解SDE - 批处理版本
                         ys = torchsde.sdeint(
                             sde=self.sde_model,
-                            y0=detached_state,
+                            y0=current_state,  # (batch, hidden_channels)
                             ts=t_solve,
                             method=self.sde_method,
-                            dt=min(self.dt, abs(current_time_val - prev_time_val) / 10),
+                            dt=self.dt,
                             rtol=self.rtol,
-                            atol=self.atol,
-                            options={'max_num_steps': 100}
+                            atol=self.atol
                         )
-                        sde_output = ys[-1]  # 取最终时间的结果
-                        consecutive_steps += 1
+                        sde_output = ys[-1]  # (batch, hidden_channels) 取最终时间的结果
+                        sde_solving_count += 1
                         
-                    except (RuntimeError, RecursionError) as e:
-                        print(f"Linear Noise SDE求解失败 (步骤 {i}): {type(e).__name__}: {str(e)[:100]}, 使用编码特征")
-                        sde_output = encoded_features[:, i]
-                        consecutive_steps = 0
                     except Exception as e:
-                        print(f"Linear Noise SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
+                        if sde_solving_count < 5:  # 只在前几次失败时打印
+                            print(f"Linear Noise SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
                         sde_output = encoded_features[:, i]
-                        consecutive_steps = 0
+                else:
+                    # 使用编码特征
+                    sde_output = encoded_features[:, i]
             
-            # 更新当前状态为SDE输出（但限制梯度累积）
-            if self.enable_gradient_detach and consecutive_steps > 0 and consecutive_steps % self.detach_interval == 0:
-                # 每N步断开一次梯度连接
-                current_state = sde_output.detach().requires_grad_(True)
-            else:
-                current_state = sde_output
-                
+            # 更新当前状态
+            current_state = sde_output
             sde_trajectory.append(sde_output)
         
         # 4. 重组SDE轨迹为完整序列
@@ -348,7 +323,8 @@ class LinearNoiseSDEContiformer(nn.Module):
         if return_stability_info:
             return logits, sde_features, {
                 'stability_margins': stability_info,
-                'mean_stability': sum(stability_info) / len(stability_info) if stability_info else 0.0
+                'mean_stability': sum(stability_info) / len(stability_info) if stability_info else 0.0,
+                'sde_solving_steps': sde_solving_count
             }
         else:
             return logits, sde_features
