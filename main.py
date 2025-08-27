@@ -35,7 +35,7 @@ def parse_args():
                        help='模型加载选项 (0:不加载, 1:加载最新, 2:加载最优)')
     
     # 数据相关 - 使用数字代表数据集
-    parser.add_argument('--dataset', type=int, default=2,
+    parser.add_argument('--dataset', type=int, default=3,
                        choices=[1, 2, 3],
                        help='数据集选择: 1=ASAS, 2=LINEAR, 3=MACHO')
     
@@ -43,7 +43,7 @@ def parse_args():
                        help='是否使用backup数据文件（推荐，避免SDE时间序列问题）')
     
     # 训练参数 - 准确率优先设置
-    parser.add_argument('--batch_size', type=int, default=32, help='批大小（准确率优先设置）')
+    parser.add_argument('--batch_size', type=int, default=16, help='批大小（准确率优先设置）')
     parser.add_argument('--epochs', type=int, default=100, help='训练轮数')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='学习率')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='权重衰减')
@@ -126,17 +126,17 @@ def main():
     criterion = torch.nn.CrossEntropyLoss()  # 使用CrossEntropyLoss而不是FocalLoss
     print(f"损失函数: CrossEntropyLoss")
     
-    # 使用Lion优化器（更好的性能）
+    # 使用Lion优化器（更保守的学习率设置）
     optimizer = Lion(
         model.parameters(),
-        lr=args.learning_rate * 0.3,  # Lion通常用更小的学习率
-        weight_decay=args.weight_decay * 10  # Lion可以用更大的weight_decay
+        lr=args.learning_rate * 0.1,  # 进一步降低到1e-5，避免训练不稳定
+        weight_decay=args.weight_decay * 5  # 适当减小weight_decay
     )
-    print(f"优化器: Lion (lr={args.learning_rate * 0.3:.1e}, wd={args.weight_decay * 10:.1e})")
+    print(f"优化器: Lion (lr={args.learning_rate * 0.1:.1e}, wd={args.weight_decay * 5:.1e})")
     
-    # 学习率调度器
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=20, T_mult=2, eta_min=1e-6
+    # 学习率调度器 - 使用自适应验证损失衰减
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-7
     )
     
     # 7. 模型加载

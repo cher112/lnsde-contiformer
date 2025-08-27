@@ -158,7 +158,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
     return avg_loss, accuracy, class_accuracies, additional_metrics
 
 
-def validate_epoch(model, val_loader, criterion, device, model_type, dataset_config, compute_confusion=False):
+def validate_epoch(model, val_loader, criterion, device, model_type, dataset_config, always_compute_confusion=True):
     """验证一个epoch"""
     model.eval()
     total_loss = 0.0
@@ -248,9 +248,9 @@ def validate_epoch(model, val_loader, criterion, device, model_type, dataset_con
     # 计算各类别准确率
     class_accuracies = calculate_class_accuracy(all_predictions, all_labels)
     
-    # 计算额外指标
+    # 计算额外指标 - 默认总是计算混淆矩阵
     additional_metrics = calculate_additional_metrics(
-        all_predictions, all_labels, np.array(all_probas) if all_probas else None, compute_confusion=compute_confusion
+        all_predictions, all_labels, np.array(all_probas) if all_probas else None, compute_confusion=always_compute_confusion
     )
     
     return avg_loss, accuracy, class_accuracies, additional_metrics
