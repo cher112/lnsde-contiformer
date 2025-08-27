@@ -79,10 +79,12 @@ class ContinuousMultiHeadAttention(nn.Module):
         # 计算注意力
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
         
-        # 应用mask
+        # 应用mask - 使用fp16安全的掩码值
         if mask is not None:
             mask = mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
-            scores = scores.masked_fill(~mask, -1e9)
+            # 使用-65504作为fp16的最小安全值，避免溢出
+            mask_value = -65504.0 if scores.dtype == torch.float16 else -1e9
+            scores = scores.masked_fill(~mask, mask_value)
             
         attention = F.softmax(scores, dim=-1)
         attention = self.dropout(attention)

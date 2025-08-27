@@ -43,17 +43,20 @@ def parse_args():
                        help='是否使用backup数据文件（推荐，避免SDE时间序列问题）')
     
     # 训练参数 - 准确率优先设置
-    parser.add_argument('--batch_size', type=int, default=16, help='批大小（准确率优先设置）')
+    parser.add_argument('--batch_size', type=int, default=32, help='批大小（避免OOM）')
     parser.add_argument('--epochs', type=int, default=100, help='训练轮数')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='学习率')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='权重衰减')
     
-    # 模型架构参数 - 增大以提高准确率
-    parser.add_argument('--hidden_channels', type=int, default=128, help='SDE隐藏维度')
-    parser.add_argument('--contiformer_dim', type=int, default=256, help='ContiFormer维度')
-    parser.add_argument('--n_heads', type=int, default=16, help='注意力头数（增大）')
-    parser.add_argument('--n_layers', type=int, default=8, help='编码器层数（增大）')
+    # 模型架构参数 - 增大以提高准确率和GPU利用率
+    parser.add_argument('--hidden_channels', type=int, default=256, help='SDE隐藏维度（增大）')
+    parser.add_argument('--contiformer_dim', type=int, default=512, help='ContiFormer维度（增大）')
+    parser.add_argument('--n_heads', type=int, default=16, help='注意力头数')
+    parser.add_argument('--n_layers', type=int, default=8, help='编码器层数')
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout率')
+    
+    # 梯度累积参数
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=4, help='梯度累积步数（模拟更大batch size）')
     
     # SDE配置
     parser.add_argument('--sde_config', type=int, default=1, choices=[1, 2, 3],
@@ -75,7 +78,8 @@ def parse_args():
     
     # 系统参数
     parser.add_argument('--device', type=str, default='auto', help='计算设备 (auto/cpu/cuda)')
-    parser.add_argument('--num_workers', type=int, default=8, help='数据加载进程数')
+    parser.add_argument('--num_workers', type=int, default=4, help='数据加载进程数（避免CPU瓶颈）')
+    parser.add_argument('--use_amp', action='store_true', default=True, help='启用混合精度训练（提高GPU利用率）')
     parser.add_argument('--seed', type=int, default=42, help='随机种子')
     
     # 保存和日志参数
@@ -104,7 +108,7 @@ def main():
     
     # 4. 数据加载
     print("=== 数据加载 ===")
-    train_loader, val_loader, test_loader, num_classes = create_dataloaders(
+    train_loader, test_loader, num_classes = create_dataloaders(
         data_path=args.data_path, 
         batch_size=args.batch_size, 
         num_workers=args.num_workers
@@ -126,13 +130,13 @@ def main():
     criterion = torch.nn.CrossEntropyLoss()  # 使用CrossEntropyLoss而不是FocalLoss
     print(f"损失函数: CrossEntropyLoss")
     
-    # 使用Lion优化器（更保守的学习率设置）
+    # 使用Lion优化器（平衡的学习率设置）
     optimizer = Lion(
         model.parameters(),
-        lr=args.learning_rate * 0.1,  # 进一步降低到1e-5，避免训练不稳定
-        weight_decay=args.weight_decay * 5  # 适当减小weight_decay
+        lr=args.learning_rate * 0.5,  # 使用5e-5，平衡稳定性和训练速度
+        weight_decay=args.weight_decay * 2  # 适中的weight_decay
     )
-    print(f"优化器: Lion (lr={args.learning_rate * 0.1:.1e}, wd={args.weight_decay * 5:.1e})")
+    print(f"优化器: Lion (lr={args.learning_rate * 0.5:.1e}, wd={args.weight_decay * 2:.1e})")
     
     # 学习率调度器 - 使用自适应验证损失衰减
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -149,7 +153,7 @@ def main():
     
     # 9. 开始训练
     training_manager = TrainingManager(
-        model, train_loader, val_loader, optimizer, criterion, device, args, dataset_config, scheduler
+        model, train_loader, test_loader, optimizer, criterion, device, args, dataset_config, scheduler
     )
     
     final_best_acc = training_manager.run_training(log_path, log_data, best_val_acc, start_epoch)

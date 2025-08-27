@@ -49,7 +49,8 @@ class TrainingManager:
             # 训练阶段
             train_loss, train_acc, train_class_acc, train_metrics = train_epoch(
                 self.model, self.train_loader, self.optimizer, self.criterion, 
-                self.device, self.args.model_type, self.dataset_config, self.scaler
+                self.device, self.args.model_type, self.dataset_config, self.scaler,
+                getattr(self.args, 'gradient_accumulation_steps', 1)
             )
             
             # 验证阶段 - 总是计算混淆矩阵

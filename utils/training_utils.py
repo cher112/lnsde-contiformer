@@ -10,8 +10,8 @@ from tqdm import tqdm
 from sklearn.metrics import f1_score, recall_score, precision_recall_fscore_support, confusion_matrix
 
 
-def train_epoch(model, train_loader, optimizer, criterion, device, model_type, dataset_config, scaler=None):
-    """训练一个epoch - 支持混合精度训练"""
+def train_epoch(model, train_loader, optimizer, criterion, device, model_type, dataset_config, scaler=None, gradient_accumulation_steps=1):
+    """训练一个epoch - 支持混合精度训练和梯度累积"""
     model.train()
     total_loss = 0.0
     correct = 0
@@ -26,9 +26,9 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
     pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training", 
                 ncols=100, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
     
+    accumulated_loss = 0.0
+    
     for batch_idx, batch in pbar:
-        optimizer.zero_grad()
-        
         # 数据移动到设备 - 转换为3维features格式
         x = batch['x'].to(device)  # (batch, seq_len, 2) [time, mag]
         y = batch['labels'].to(device)
@@ -74,13 +74,22 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
                     )
                     if isinstance(loss, tuple):
                         loss = loss[0]  # 取总损失
-                
+            
+            # 梯度累积 - 缩放损失
+            loss = loss / gradient_accumulation_steps
+            accumulated_loss += loss.item()
+            
             scaler.scale(loss).backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            
+            # 每accumulation_steps步或最后一批执行优化
+            if (batch_idx + 1) % gradient_accumulation_steps == 0 or (batch_idx + 1) == len(train_loader):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                
         else:
-            # 普通训练
+            # 普通训练 - 也支持梯度累积
             if model_type == 'geometric':
                 logits, sde_features = model(features, times, mask)
                 loss = model.compute_loss(
@@ -107,12 +116,20 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
                 if isinstance(loss, tuple):
                     loss = loss[0]  # 取总损失
             
+            # 梯度累积 - 缩放损失
+            loss = loss / gradient_accumulation_steps
+            accumulated_loss += loss.item()
+            
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
+            
+            # 每accumulation_steps步或最后一批执行优化
+            if (batch_idx + 1) % gradient_accumulation_steps == 0 or (batch_idx + 1) == len(train_loader):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
         
-        # 统计
-        total_loss += loss.item()
+        # 统计 - 使用原始损失（不是缩放后的）
+        total_loss += accumulated_loss * gradient_accumulation_steps if (batch_idx + 1) % gradient_accumulation_steps == 0 else 0
         _, predicted = torch.max(logits.data, 1)
         total += y.size(0)
         correct += (predicted == y).sum().item()

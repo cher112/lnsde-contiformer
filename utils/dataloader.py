@@ -38,7 +38,9 @@ class LightCurveDataset(Dataset):
             self.feature_keys = feature_keys
             
         # 加载数据
-        self.data = self._load_data()
+        print(f"正在加载并预处理数据: {data_path}")
+        raw_data = self._load_data()
+        self.data = self._preprocess_data(raw_data)  # 预处理数据
         self.num_samples = len(self.data)
         
         # 提取标签和类别信息
@@ -59,7 +61,7 @@ class LightCurveDataset(Dataset):
         else:
             self.scalers = None
             
-        print(f"数据集加载完成: {self.num_samples}个样本, {self.num_classes}个类别")
+        print(f"数据集预处理完成: {self.num_samples}个样本, {self.num_classes}个类别")
         self._print_dataset_info()
     
     def _load_data(self) -> List[Dict]:
@@ -74,6 +76,74 @@ class LightCurveDataset(Dataset):
             
         print(f"原始数据包含 {len(data)} 个样本")
         return data
+    
+    def _preprocess_data(self, raw_data: List[Dict]) -> List[Dict]:
+        """预处理所有数据，避免在__getitem__中重复计算"""
+        processed_data = []
+        print("正在预处理时间序列数据...")
+        
+        for i, item in enumerate(raw_data):
+            try:
+                # 提取基础信息
+                mask = item['mask'].astype(bool)
+                times = item['time'].astype(np.float32)
+                mags = item['mag'].astype(np.float32)
+                errmags = item['errmag'].astype(np.float32)
+                period = np.float32(item['period'])
+                
+                # 获取有效的时间点和数据
+                valid_indices = mask
+                valid_times = times[valid_indices]
+                valid_mags = mags[valid_indices]
+                valid_errmags = errmags[valid_indices]
+                
+                # 按时间排序
+                sort_indices = np.argsort(valid_times)
+                sorted_times = valid_times[sort_indices]
+                sorted_mags = valid_mags[sort_indices]
+                sorted_errmags = valid_errmags[sort_indices]
+                
+                # 确保时间严格递增（去除重复时间点）
+                unique_indices = np.diff(sorted_times, prepend=-np.inf) > 1e-6
+                final_times = sorted_times[unique_indices]
+                final_mags = sorted_mags[unique_indices]
+                final_errmags = sorted_errmags[unique_indices]
+                
+                actual_length = len(final_times)
+                
+                # Padding到固定长度
+                max_len = len(times)
+                padded_times = np.zeros(max_len, dtype=np.float32)
+                padded_mags = np.zeros(max_len, dtype=np.float32)
+                padded_errmags = np.zeros(max_len, dtype=np.float32)
+                padded_mask = np.zeros(max_len, dtype=bool)
+                
+                padded_times[:actual_length] = final_times
+                padded_mags[:actual_length] = final_mags
+                padded_errmags[:actual_length] = final_errmags
+                padded_mask[:actual_length] = True
+                
+                # 构建预处理后的数据项
+                processed_item = {
+                    'times': padded_times,
+                    'mags': padded_mags,
+                    'errmags': padded_errmags,
+                    'mask': padded_mask,
+                    'period': period,
+                    'actual_length': actual_length,
+                    'label': item['label'],
+                    'class_name': item['class_name'],
+                    'original_index': i
+                }
+                
+                processed_data.append(processed_item)
+                
+            except Exception as e:
+                print(f"预处理第{i}个样本时出错: {e}")
+                continue
+                
+        print(f"预处理完成: {len(processed_data)}/{len(raw_data)} 个样本")
+        return processed_data
     
     def _compute_class_weights(self) -> torch.Tensor:
         """计算类别权重，用于处理不平衡数据"""
@@ -153,7 +223,7 @@ class LightCurveDataset(Dataset):
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """
-        获取单个样本 - 匹配 elses 模型输入格式（不使用SuperSmoother和fit_x）
+        获取单个样本 - 使用预处理数据，大幅提升性能
         Returns:
             sample: {
                 'x': (seq_len, 2) 原始光变曲线 [time, mag]
@@ -167,60 +237,19 @@ class LightCurveDataset(Dataset):
         """
         item = self.data[idx]
         
-        # 提取基础信息
-        mask = item['mask'].astype(bool)  # 转为布尔mask
-        times = item['time'].astype(np.float32)
-        mags = item['mag'].astype(np.float32)
-        errmags = item['errmag'].astype(np.float32)
-        period = np.float32(item['period'])
-        valid_length = int(item['valid_points'])
-        
-        # 确保时间序列是严格递增的 - SDE求解器要求
-        # 获取有效的时间点和数据
-        valid_indices = mask
-        valid_times = times[valid_indices]
-        valid_mags = mags[valid_indices]
-        valid_errmags = errmags[valid_indices]
-        
-        # 按时间排序
-        sort_indices = np.argsort(valid_times)
-        sorted_times = valid_times[sort_indices]
-        sorted_mags = valid_mags[sort_indices]
-        sorted_errmags = valid_errmags[sort_indices]
-        
-        # 确保时间严格递增（去除重复时间点）
-        unique_indices = np.diff(sorted_times, prepend=-np.inf) > 1e-6  # 时间间隔至少1微秒
-        final_times = sorted_times[unique_indices]
-        final_mags = sorted_mags[unique_indices]
-        final_errmags = sorted_errmags[unique_indices]
-        
-        # 更新有效长度
-        actual_length = len(final_times)
-        
-        # Padding到固定长度，但保持mask信息
-        max_len = len(times)
-        padded_times = np.zeros(max_len, dtype=np.float32)
-        padded_mags = np.zeros(max_len, dtype=np.float32) 
-        padded_errmags = np.zeros(max_len, dtype=np.float32)
-        padded_mask = np.zeros(max_len, dtype=bool)
-        
-        padded_times[:actual_length] = final_times
-        padded_mags[:actual_length] = final_mags
-        padded_errmags[:actual_length] = final_errmags
-        padded_mask[:actual_length] = True
+        # 直接从预处理数据中获取，无需重复计算
+        times = item['times']
+        mags = item['mags'] 
+        errmags = item['errmags']
+        mask = item['mask']
+        period = item['period']
+        actual_length = item['actual_length']
         
         # 构建 elses 格式的输入数据
-        # x: [time, mag] 作为主要输入
-        x = np.column_stack([padded_times, padded_mags])
-        
-        # time_steps: 时间序列
-        time_steps = padded_times
-        
-        # periods: 周期信息 (标量扩展为向量形式)
+        x = np.column_stack([times, mags])
+        time_steps = times
         periods = np.array([period], dtype=np.float32)
-        
-        # attn_mask: 基于有效点的mask
-        attn_mask = padded_mask.astype(np.float32)
+        attn_mask = mask.astype(np.float32)
         
         # 转换为tensor
         x = torch.from_numpy(x.astype(np.float32))
@@ -239,13 +268,13 @@ class LightCurveDataset(Dataset):
             'label': label,
             'class_name': item['class_name'],
             'valid_length': actual_length,
-            'original_index': idx,
+            'original_index': item['original_index'],
             # 保留原有格式兼容
             'features': torch.cat([time_steps.unsqueeze(1), 
-                                  torch.from_numpy(padded_mags.astype(np.float32)).unsqueeze(1),
-                                  torch.from_numpy(padded_errmags.astype(np.float32)).unsqueeze(1)], dim=1),
+                                  torch.from_numpy(mags.astype(np.float32)).unsqueeze(1),
+                                  torch.from_numpy(errmags.astype(np.float32)).unsqueeze(1)], dim=1),
             'times': time_steps,
-            'mask': torch.from_numpy(padded_mask)
+            'mask': torch.from_numpy(mask)
         }
 
 
@@ -340,18 +369,16 @@ def collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
 def create_dataloaders(data_path: str, 
                       batch_size: int = 32,
                       train_ratio: float = 0.8,
-                      val_ratio: float = 0.1,
-                      test_ratio: float = 0.1,
+                      test_ratio: float = 0.2,
                       normalize: bool = False,  # 默认关闭归一化，因为数据已经folded
                       num_workers: int = 8,
-                      random_seed: int = 42) -> Tuple[DataLoader, DataLoader, DataLoader]:
+                      random_seed: int = 42) -> Tuple[DataLoader, DataLoader, int]:
     """
-    创建训练、验证、测试数据加载器
+    创建训练、测试数据加载器（80-20分割）
     Args:
         data_path: 数据文件路径
         batch_size: 批大小
         train_ratio: 训练集比例  
-        val_ratio: 验证集比例
         test_ratio: 测试集比例
         normalize: 是否标准化
         num_workers: 数据加载进程数
@@ -370,38 +397,30 @@ def create_dataloaders(data_path: str,
     # 计算分割大小
     total_size = len(full_dataset)
     train_size = int(total_size * train_ratio)
-    val_size = int(total_size * val_ratio)
-    test_size = total_size - train_size - val_size
+    test_size = total_size - train_size
     
     print(f"数据集分割:")
     print(f"  训练集: {train_size} 样本 ({train_ratio*100:.1f}%)")
-    print(f"  验证集: {val_size} 样本 ({val_ratio*100:.1f}%)")
     print(f"  测试集: {test_size} 样本 ({test_ratio*100:.1f}%)")
     
     # 随机分割数据集
-    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
+    train_dataset, test_dataset = torch.utils.data.random_split(
         full_dataset, 
-        [train_size, val_size, test_size],
+        [train_size, test_size],
         generator=torch.Generator().manual_seed(random_seed)
     )
     
-    # 创建数据加载器
+    # 创建数据加载器 - 优化GPU利用率
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         collate_fn=collate_fn,
-        pin_memory=True
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        collate_fn=collate_fn,
-        pin_memory=True
+        pin_memory=True,
+        persistent_workers=True,  # 保持worker进程，减少重启开销
+        prefetch_factor=8,        # 增加预取批次数
+        drop_last=True           # 丢弃不完整的batch，提高训练稳定性
     )
     
     test_loader = DataLoader(
@@ -410,7 +429,9 @@ def create_dataloaders(data_path: str,
         shuffle=False,
         num_workers=num_workers,
         collate_fn=collate_fn,
-        pin_memory=True
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=8
     )
     
-    return train_loader, val_loader, test_loader, full_dataset.num_classes
+    return train_loader, test_loader, full_dataset.num_classes

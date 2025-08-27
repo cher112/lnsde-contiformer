@@ -134,8 +134,9 @@ class ConvModule(nn.Module):
 
 
 class IrregularTimeAttention(nn.Module):
-    def __init__(self, eps=-1e9, dropout=0.1):
+    def __init__(self, eps=None, dropout=0.1):
         super(IrregularTimeAttention, self).__init__()
+        # 使用None，在forward中根据数据类型动态设置
         self.eps = eps
         self.dropout = nn.Dropout(dropout)
 
@@ -147,7 +148,9 @@ class IrregularTimeAttention(nn.Module):
                  / math.sqrt(d_k)
         scores = scores.unsqueeze(-1).repeat_interleave(dim, dim=-1)  # torch.Size([50, 1, 256, 256, 16])
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, self.eps)
+            # 根据scores的数据类型选择安全的eps值
+            eps_value = self.eps if self.eps is not None else (-65504.0 if scores.dtype == torch.float16 else -1e9)
+            scores = scores.masked_fill(mask == 0, eps_value)
         p_attn = F.softmax(scores, dim=-2)
         if self.dropout is not None:
             p_attn = self.dropout(p_attn)

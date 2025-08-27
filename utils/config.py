@@ -52,16 +52,16 @@ def get_dataset_specific_params(dataset_id, args):
 def setup_sde_config(sde_config_id, args):
     """设置SDE求解参数"""
     sde_config_mapping = {
-        1: {  # 准确率优先
+        1: {  # 准确率优先 - 增加计算密度
             'sde_method': 'milstein',
-            'dt': 0.01,
+            'dt': 0.005,  # 减小步长，增加积分步数
             'rtol': 1e-6,
             'atol': 1e-7,
             'name': '准确率优先'
         },
         2: {  # 平衡
             'sde_method': 'euler',
-            'dt': 0.05,
+            'dt': 0.025,  # 适度减小步长
             'rtol': 1e-5,
             'atol': 1e-6,
             'name': '平衡'
