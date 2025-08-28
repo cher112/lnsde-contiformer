@@ -22,9 +22,9 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
     all_periods = []
     all_probas = []
     
-    # 创建进度条
-    pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training", 
-                ncols=100, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+    # 创建进度条 - 更紧凑的显示格式
+    pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training",
+                ncols=140, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}, {postfix}]')
     
     accumulated_loss = 0.0
     
@@ -143,24 +143,29 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
         probas = torch.softmax(logits, dim=1)
         all_probas.extend(probas.detach().cpu().numpy())
         
-        # 计算当前指标（每10个batch更新一次）
+        # 计算当前指标
         current_acc = 100. * correct / total
-        postfix = {'Loss': f'{loss.item():.4f}', 'Acc': f'{current_acc:.2f}%'}
+        current_loss = accumulated_loss * gradient_accumulation_steps if (batch_idx + 1) % gradient_accumulation_steps == 0 else loss.item()
         
-        # 每10个batch计算并显示额外指标
-        if (batch_idx + 1) % 10 == 0 and len(all_predictions) >= 10:
+        # 实时更新进度条显示Loss和Acc
+        pbar.set_postfix({
+            'Loss': f'{current_loss:.4f}',
+            'Acc': f'{current_acc:.2f}%'
+        })
+        
+        # 每20个batch计算并显示额外指标
+        if (batch_idx + 1) % 20 == 0 and len(all_predictions) >= 20:
             batch_metrics = calculate_additional_metrics(
                 all_predictions, all_labels, np.array(all_probas) if all_probas else None
             )
-            postfix.update({
-                'F1': f'{batch_metrics["f1_score"]:.1f}',
-                'Rec': f'{batch_metrics["recall"]:.1f}'
+            # 更新进度条显示包含F1和Recall
+            pbar.set_postfix({
+                'Loss': f'{current_loss:.4f}',
+                'Acc': f'{current_acc:.2f}%',
+                'F1': f'{batch_metrics["f1_score"]:.1f}%'
             })
-        
-        pbar.set_postfix(postfix)
     
-    pbar.close()
-    
+    # 移除多余输出，直接计算最终指标
     avg_loss = total_loss / len(train_loader)
     accuracy = 100. * correct / total
     
@@ -189,7 +194,7 @@ def validate_epoch(model, val_loader, criterion, device, model_type, dataset_con
     
     # 创建进度条
     pbar = tqdm(val_loader, desc="Validation", 
-                ncols=100, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+                ncols=140, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}, {postfix}]')
     
     with torch.no_grad():
         for batch in pbar:
@@ -250,15 +255,14 @@ def validate_epoch(model, val_loader, criterion, device, model_type, dataset_con
             probas = torch.softmax(logits, dim=1)
             all_probas.extend(probas.detach().cpu().numpy())
             
-            # 更新进度条
+            # 每个batch显示进度和loss信息  
             current_acc = 100. * correct / total
             pbar.set_postfix({
                 'Loss': f'{loss.item():.4f}',
                 'Acc': f'{current_acc:.2f}%'
             })
     
-    pbar.close()
-    
+    # 移除多余输出，直接计算最终指标
     avg_loss = total_loss / len(val_loader)
     accuracy = 100. * correct / total
     

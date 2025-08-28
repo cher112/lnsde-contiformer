@@ -30,8 +30,9 @@ class TrainingManager:
         self.use_amp = hasattr(args, 'use_amp') and args.use_amp
         self.scaler = GradScaler() if self.use_amp else None
         
-        # 设置模型保存路径
-        self.model_save_dir = setup_model_save_paths(args.save_dir, args.dataset_name, args.model_type)
+        # 使用标准化路径 - models 子目录已在 timestamp_path 中创建
+        self.model_save_dir = os.path.join(args.save_dir, "models")
+        os.makedirs(self.model_save_dir, exist_ok=True)
         
     def run_training(self, log_path, log_data, best_val_acc=0.0, start_epoch=0):
         """运行完整的训练流程"""
@@ -64,10 +65,10 @@ class TrainingManager:
             
             epoch_time = time.time() - epoch_start_time
             
-            # 更新学习率调度器 - ReduceLROnPlateau需要传入验证损失
+            # 更新学习率调度器 - ReduceLROnPlateau现在监控验证准确率
             if self.scheduler is not None:
                 if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    self.scheduler.step(val_loss)
+                    self.scheduler.step(val_acc)  # 传入验证准确率
                 else:
                     self.scheduler.step()
             
@@ -99,7 +100,8 @@ class TrainingManager:
             # 清理GPU内存
             clear_gpu_memory()
         
-        print(f"\n=== 训练完成 ===")
+        # 移除多余输出
+        # print(f"\n=== 训练完成 ===")
         print(f"最佳验证准确率: {best_val_acc:.4f}%")
         
         # 生成训练可视化图表
@@ -109,21 +111,11 @@ class TrainingManager:
             model_type_map = {1: 'langevin', 2: 'linear_noise', 3: 'geometric'}
             model_type_str = model_type_map.get(self.args.model_type, 'unknown')
             
-            # 从log_path获取日期信息
-            import os
-            from datetime import datetime
-            log_dir_parts = log_path.split(os.sep)
-            date_str = None
-            for part in log_dir_parts:
-                if len(part) == 8 and part.isdigit():  # 格式如 20250826
-                    date_str = part
-                    break
-            
-            if date_str is None:
-                date_str = datetime.now().strftime('%Y%m%d')
+            # 使用标准化路径 - timestamp_dir 就是 args.save_dir
+            timestamp_dir = self.args.save_dir
             
             generated_files = generate_training_visualizations(
-                log_path, self.args.dataset_name, model_type_str, date_str
+                log_path, self.args.dataset_name, model_type_str, timestamp_dir
             )
             
             if generated_files:

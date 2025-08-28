@@ -42,16 +42,17 @@ class LinearNoiseSDE(BaseSDEModel):
             nn.Softplus()  # 确保为正
         )
         
-        # B(t): 时间相关的乘性噪声系数
+        # B(t): 时间相关的乘性噪声系数 - 稳定性改进版本
         self.B_net = nn.Sequential(
             nn.Linear(1, hidden_channels),
             nn.Tanh(),
             nn.Linear(hidden_channels, hidden_channels),
-            nn.Tanh()  # 可以为负，控制增长/衰减
+            nn.Sigmoid()  # 输出[0,1]，防止负乘性噪声导致不稳定
         )
         
-        # 稳定性参数：确保满足稳定性条件 |σ|² > 2L_f
-        self.min_diffusion = nn.Parameter(torch.tensor(0.1))
+        # 稳定性参数：大幅增强以确保满足稳定性条件 |σ|² > 2L_f
+        self.min_diffusion = nn.Parameter(torch.tensor(1.0))  # 从0.1提升至1.0
+        self.max_diffusion_scale = nn.Parameter(torch.tensor(5.0))  # 扩散项上界控制
         
         # 初始化参数
         self._init_weights()
@@ -87,7 +88,7 @@ class LinearNoiseSDE(BaseSDEModel):
         
     def g(self, t, y):
         """
-        扩散函数：A(t) + B(t)y （线性噪声）
+        扩散函数：A(t) + B(t)y （线性噪声） - 数值稳定性增强版
         Args:
             t: (batch,) 时间
             y: (batch, hidden_channels) 状态
@@ -102,13 +103,20 @@ class LinearNoiseSDE(BaseSDEModel):
         
         # 计算 A(t) 和 B(t)
         A_t = self.A_net(t_expanded)  # (batch, hidden_channels)
-        B_t = self.B_net(t_expanded)  # (batch, hidden_channels)
+        B_t = self.B_net(t_expanded)  # (batch, hidden_channels) - 现在输出[0,1]
         
-        # 线性扩散: A(t) + B(t) * y
-        diffusion = A_t + B_t * y
+        # 状态归一化，防止y过大导致数值爆炸
+        y_normalized = torch.clamp(y, -10.0, 10.0)  # 限制状态范围
         
-        # 添加最小扩散以确保数值稳定性
-        diffusion = diffusion + self.min_diffusion.abs()
+        # 线性扩散: A(t) + B(t) * y_normalized
+        diffusion = A_t + B_t * y_normalized
+        
+        # 增强的稳定性控制
+        min_diff = self.min_diffusion.abs()  # 最小扩散：1.0
+        max_diff = self.max_diffusion_scale.abs()  # 最大扩散：5.0
+        
+        # 确保扩散项始终为正且在合理范围内
+        diffusion = torch.clamp(diffusion + min_diff, min_diff, max_diff)
         
         return diffusion
     
@@ -152,7 +160,11 @@ class LinearNoiseSDEContiformer(nn.Module):
                  atol=1e-4,
                  # 梯度管理参数
                  enable_gradient_detach=True,
-                 detach_interval=10):
+                 detach_interval=10,
+                 # 调试参数
+                 debug_mode=False,
+                 # SDE求解优化参数
+                 min_time_interval=0.01):
         super().__init__()
         
         self.input_dim = input_dim
@@ -166,6 +178,12 @@ class LinearNoiseSDEContiformer(nn.Module):
         # 梯度管理参数
         self.enable_gradient_detach = enable_gradient_detach
         self.detach_interval = detach_interval
+        
+        # 调试模式
+        self.debug_mode = debug_mode
+        
+        # SDE求解优化参数
+        self.min_time_interval = min_time_interval
         
         # 输入特征编码器
         self.feature_encoder = nn.Sequential(
@@ -261,15 +279,17 @@ class LinearNoiseSDEContiformer(nn.Module):
                 else:
                     batch_has_valid = True
                 
-                # 检查时间是否递增（使用第一个样本作为参考）
+                # 检查时间是否递增且间隔足够大（使用第一个样本作为参考）
                 prev_time_val = prev_time[0].item()
                 current_time_val = current_time[0].item()
                 time_increasing = current_time_val > prev_time_val + 1e-6
+                time_interval_sufficient = (current_time_val - prev_time_val) >= self.min_time_interval
                 
                 # 决定是否进行SDE求解
                 should_solve_sde = (
                     batch_has_valid and 
                     time_increasing and
+                    time_interval_sufficient and  # 新增时间间隔检查
                     prev_time_val > 0 and 
                     current_time_val > 0
                 )
@@ -278,21 +298,30 @@ class LinearNoiseSDEContiformer(nn.Module):
                     t_solve = torch.stack([prev_time[0], current_time[0]])  # 使用第一个样本的时间作为参考
                     
                     try:
-                        # 求解SDE - 批处理版本
+                        # 求解SDE - 使用高精度配置保持准确性
+                        if self.debug_mode:
+                            print(f"    开始SDE求解: t={prev_time[0].item():.3f} → {current_time[0].item():.3f}")
                         ys = torchsde.sdeint(
                             sde=self.sde_model,
                             y0=current_state,  # (batch, hidden_channels)
                             ts=t_solve,
-                            method=self.sde_method,
-                            dt=self.dt,
-                            rtol=self.rtol,
-                            atol=self.atol
+                            method=self.sde_method,  # 使用原始配置的method (milstein)
+                            dt=min(self.dt, 0.005),  # 使用更小的步长保证精度
+                            rtol=self.rtol,  # 使用原始的高精度容差
+                            atol=self.atol,  # 使用原始的高精度容差
+                            options={
+                                'norm': torch.norm,  # 使用L2范数进行误差估计
+                                'jump_t': None,      # 避免不连续时间点
+                                'adaptive': True     # 启用自适应步长
+                            }
                         )
                         sde_output = ys[-1]  # (batch, hidden_channels) 取最终时间的结果
                         sde_solving_count += 1
+                        if self.debug_mode:
+                            print(f"    SDE求解成功，输出range: [{sde_output.min().item():.3f}, {sde_output.max().item():.3f}]")
                         
                     except Exception as e:
-                        if sde_solving_count < 5:  # 只在前几次失败时打印
+                        if self.debug_mode and sde_solving_count < 5:  # 调试模式下显示失败信息
                             print(f"Linear Noise SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
                         sde_output = encoded_features[:, i]
                 else:

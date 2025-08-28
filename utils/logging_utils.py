@@ -6,21 +6,20 @@ import os
 import json
 import time
 from datetime import datetime
+from .path_manager import get_log_path
 
 
-def setup_logging(log_dir, dataset_name, model_type, sde_config):
-    """设置日志记录 - 新格式: logs/日期/数据集/文件.log"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    date_str = datetime.now().strftime("%Y%m%d")
+def setup_logging(timestamp_dir, dataset_name, model_type, sde_config):
+    """设置日志记录 - 使用新的时间戳目录结构"""
+    now = datetime.now()
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    date_str = now.strftime("%Y%m%d")
     
-    # 创建日志目录: logs/日期/数据集/
-    date_log_dir = os.path.join(log_dir, date_str)
-    dataset_log_dir = os.path.join(date_log_dir, dataset_name)
-    os.makedirs(dataset_log_dir, exist_ok=True)
+    # 使用新的路径管理获取日志路径
+    log_path = os.path.join(timestamp_dir, "logs", f"{dataset_name}_{model_type}_config{sde_config}.log")
     
-    # 日志文件名
-    log_filename = f"{dataset_name}_{model_type}_config{sde_config}_{timestamp}.log"
-    log_path = os.path.join(dataset_log_dir, log_filename)
+    # 确保目录存在
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
     
     # 初始化日志数据
     log_data = {

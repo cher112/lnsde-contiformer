@@ -21,6 +21,12 @@ def configure_chinese_font():
         # 设置中文字体优先级列表
         plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei', 'WenQuanYi Micro Hei', 'DejaVu Sans']
         plt.rcParams['axes.unicode_minus'] = False
+        
+        # 抑制字体警告
+        import warnings
+        warnings.filterwarnings("ignore", category=UserWarning, message=".*Glyph.*missing from font.*")
+        warnings.filterwarnings("ignore", category=UserWarning, message=".*Font.*does not have a glyph.*")
+        
         return True
     except Exception as e:
         print(f"字体配置失败: {e}")
@@ -206,7 +212,7 @@ def create_epoch_time_plot(epochs, time_values, save_path, use_chinese=True):
     
     return save_path
 
-def generate_training_visualizations(log_file, dataset_name, model_type_str, date_str=None):
+def generate_training_visualizations(log_file, dataset_name, model_type_str, timestamp_dir=None):
     """
     生成训练可视化图表的主函数
     
@@ -214,7 +220,7 @@ def generate_training_visualizations(log_file, dataset_name, model_type_str, dat
         log_file (str): 训练日志文件路径
         dataset_name (str): 数据集名称 (e.g., 'LINEAR', 'ASAS', 'MACHO')
         model_type_str (str): 模型类型字符串 (e.g., 'linear_noise')
-        date_str (str): 日期字符串，如果为None则使用当前日期
+        timestamp_dir (str): 时间戳目录路径，使用新的标准化路径结构
     
     Returns:
         list: 生成的图片文件路径列表
@@ -226,12 +232,13 @@ def generate_training_visualizations(log_file, dataset_name, model_type_str, dat
     # 配置中文字体
     use_chinese = configure_chinese_font()
     
-    # 如果没有提供日期，使用当前日期
-    if date_str is None:
-        date_str = datetime.now().strftime('%Y%m%d')
+    # 使用标准化路径结构 - 训练图表放在 timestamp_dir/plots
+    if timestamp_dir is not None:
+        output_dir = os.path.join(timestamp_dir, "plots")
+    else:
+        # 后备方案：使用基础results目录
+        output_dir = f'/root/autodl-tmp/lnsde-contiformer/results/plots'
     
-    # 创建输出目录 - 按照 pics/日期/数据集 的格式
-    output_dir = f'/root/autodl-tmp/lnsde-contiformer/results/pics/{date_str}/{dataset_name}'
     os.makedirs(output_dir, exist_ok=True)
     
     # 提取指标数据

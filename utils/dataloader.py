@@ -38,7 +38,6 @@ class LightCurveDataset(Dataset):
             self.feature_keys = feature_keys
             
         # 加载数据
-        print(f"正在加载并预处理数据: {data_path}")
         raw_data = self._load_data()
         self.data = self._preprocess_data(raw_data)  # 预处理数据
         self.num_samples = len(self.data)
@@ -61,26 +60,21 @@ class LightCurveDataset(Dataset):
         else:
             self.scalers = None
             
-        print(f"数据集预处理完成: {self.num_samples}个样本, {self.num_classes}个类别")
         self._print_dataset_info()
     
     def _load_data(self) -> List[Dict]:
         """加载lombscaler折叠数据"""
-        print(f"正在加载数据: {self.data_path}")
-        
         with open(self.data_path, 'rb') as f:
             data = pickle.load(f)
             
         if not isinstance(data, list):
             raise ValueError(f"数据格式错误: 期望list, 得到{type(data)}")
             
-        print(f"原始数据包含 {len(data)} 个样本")
         return data
     
     def _preprocess_data(self, raw_data: List[Dict]) -> List[Dict]:
         """预处理所有数据，避免在__getitem__中重复计算"""
         processed_data = []
-        print("正在预处理时间序列数据...")
         
         for i, item in enumerate(raw_data):
             try:
@@ -142,7 +136,6 @@ class LightCurveDataset(Dataset):
                 print(f"预处理第{i}个样本时出错: {e}")
                 continue
                 
-        print(f"预处理完成: {len(processed_data)}/{len(raw_data)} 个样本")
         return processed_data
     
     def _compute_class_weights(self) -> torch.Tensor:
@@ -205,12 +198,11 @@ class LightCurveDataset(Dataset):
     
     def _print_dataset_info(self):
         """打印数据集信息（简化版）"""
-        print(f"=== 数据集 ===")
-        print(f"样本: {self.num_samples}, 类别: {self.num_classes}, 特征: {len(self.feature_keys)}, 序列长度: {self.max_seq_len}")
+        print(f"数据集加载完成: {self.num_samples}样本, {self.num_classes}类别")
         
         # 简化类别分布
         from collections import Counter
-        label_counts = Counter(self.labels)
+        class_counts = Counter(self.labels)
         class_info = []
         for i, class_name in enumerate(self.class_names):
             original_label = self.label_encoder.classes_[i]
@@ -399,9 +391,7 @@ def create_dataloaders(data_path: str,
     train_size = int(total_size * train_ratio)
     test_size = total_size - train_size
     
-    print(f"数据集分割:")
-    print(f"  训练集: {train_size} 样本 ({train_ratio*100:.1f}%)")
-    print(f"  测试集: {test_size} 样本 ({test_ratio*100:.1f}%)")
+    print(f"数据分割: 训练集{train_size}样本, 测试集{test_size}样本")
     
     # 随机分割数据集
     train_dataset, test_dataset = torch.utils.data.random_split(
@@ -410,28 +400,34 @@ def create_dataloaders(data_path: str,
         generator=torch.Generator().manual_seed(random_seed)
     )
     
-    # 创建数据加载器 - 优化GPU利用率
+    # 创建数据加载器配置 - 根据num_workers调整参数
+    loader_kwargs = {
+        'batch_size': batch_size,
+        'collate_fn': collate_fn,
+        'pin_memory': True
+    }
+    
+    # 只有在使用多进程时才设置这些参数
+    if num_workers > 0:
+        loader_kwargs.update({
+            'num_workers': num_workers,
+            'persistent_workers': True,  # 保持worker进程，减少重启开销
+            'prefetch_factor': 8,        # 增加预取批次数
+        })
+    else:
+        loader_kwargs['num_workers'] = 0
+    
     train_loader = DataLoader(
         train_dataset,
-        batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        collate_fn=collate_fn,
-        pin_memory=True,
-        persistent_workers=True,  # 保持worker进程，减少重启开销
-        prefetch_factor=8,        # 增加预取批次数
-        drop_last=True           # 丢弃不完整的batch，提高训练稳定性
+        drop_last=True,  # 丢弃不完整的batch，提高训练稳定性
+        **loader_kwargs
     )
     
     test_loader = DataLoader(
         test_dataset,
-        batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        collate_fn=collate_fn,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=8
+        **loader_kwargs
     )
     
     return train_loader, test_loader, full_dataset.num_classes

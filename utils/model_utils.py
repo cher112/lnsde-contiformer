@@ -43,7 +43,9 @@ def create_model(model_type, num_classes, args, dataset_config):
     if model_type == 'linear_noise':
         model_configs.update({
             'enable_gradient_detach': dataset_config['enable_gradient_detach'],
-            'detach_interval': args.detach_interval
+            'detach_interval': args.detach_interval,
+            'debug_mode': getattr(args, 'debug_mode', False),  # 添加调试模式参数，默认为False
+            'min_time_interval': dataset_config.get('min_time_interval', 0.01)  # 添加时间间隔参数
         })
     
     if model_type == 'langevin':
@@ -80,17 +82,17 @@ def save_checkpoint(model, optimizer, epoch, loss, accuracy, save_path):
 
 
 def load_model_checkpoint(model, optimizer, args, load_type):
-    """根据选项加载模型检查点 - 支持新的路径格式"""
+    """根据选项加载模型检查点 - 使用标准化路径结构"""
     if load_type == 0:  # 不加载
         print("不加载任何预训练模型，从头开始训练")
         return 0.0, 0
     
-    # 搜索所有可能的日期目录
+    # 搜索所有可能的路径
     potential_paths = []
     
     if load_type == 1:  # 加载最新
-        # 在checkpoints目录下搜索所有日期目录中的epoch模型
-        for root, dirs, files in os.walk(args.save_dir):
+        # 在results目录下递归搜索epoch模型
+        for root, dirs, files in os.walk("./results"):
             for file in files:
                 if (file.startswith(f"{args.dataset_name}_{args.model_type}_epoch_") and 
                     file.endswith('.pth')):
@@ -113,8 +115,8 @@ def load_model_checkpoint(model, optimizer, args, load_type):
         checkpoint_path = latest_path
         
     elif load_type == 2:  # 加载最好
-        # 搜索所有日期目录中的best模型
-        for root, dirs, files in os.walk(args.save_dir):
+        # 递归搜索best模型
+        for root, dirs, files in os.walk("./results"):
             for file in files:
                 if file == f"{args.dataset_name}_{args.model_type}_best.pth":
                     full_path = os.path.join(root, file)
@@ -136,38 +138,42 @@ def load_model_checkpoint(model, optimizer, args, load_type):
         
         # 验证模型参数是否匹配
         saved_params = checkpoint.get('model_params', {})
-        current_params = {
-            'hidden_channels': args.hidden_channels,
-            'contiformer_dim': args.contiformer_dim,
-            'n_heads': args.n_heads,
-            'n_layers': args.n_layers,
-            'sde_method': args.sde_method,
-            'dt': args.dt,
-        }
-        
-        # 检查关键参数是否匹配
-        param_mismatch = False
-        for key, value in current_params.items():
-            if key in saved_params and saved_params[key] != value:
-                print(f"参数不匹配 {key}: 当前={value}, 保存={saved_params[key]}")
-                param_mismatch = True
-        
-        if param_mismatch:
-            print("模型参数不匹配，从头开始训练")
-            return 0.0, 0
+        if saved_params:  # 只有当保存了参数信息时才检查
+            current_params = {
+                'hidden_channels': args.hidden_channels,
+                'contiformer_dim': args.contiformer_dim,
+                'n_heads': args.n_heads,
+                'n_layers': args.n_layers,
+                'sde_method': args.sde_method,
+                'dt': args.dt,
+            }
+            
+            # 检查关键参数是否匹配
+            param_mismatch = False
+            for key, value in current_params.items():
+                if key in saved_params and saved_params[key] != value:
+                    print(f"参数不匹配 {key}: 当前={value}, 保存={saved_params[key]}")
+                    param_mismatch = True
+            
+            if param_mismatch:
+                print("模型参数不匹配，从头开始训练")
+                return 0.0, 0
         
         # 加载模型状态
         model.load_state_dict(checkpoint['model_state_dict'])
         print(f"✓ 模型状态已加载")
         
-        # 加载优化器状态（仅对epoch模型）
+        # 尝试加载优化器状态（仅对继续训练有效）
         if load_type == 1 and 'optimizer_state_dict' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            print(f"✓ 优化器状态已加载")
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                print(f"✓ 优化器状态已加载")
+            except Exception as e:
+                print(f"⚠️ 优化器加载失败（可能是优化器类型不匹配）: {e}")
         
         # 返回相关信息
         best_val_acc = checkpoint.get('best_val_accuracy', checkpoint.get('accuracy', 0.0))
-        start_epoch = checkpoint.get('epoch', 0) + 1 if load_type == 1 else checkpoint.get('epoch', 0) + 1
+        start_epoch = checkpoint.get('epoch', 0) + 1 if load_type == 1 else 0
         
         print(f"✓ 加载完成 - 最佳验证精度: {best_val_acc:.4f}, 开始轮次: {start_epoch}")
         return best_val_acc, start_epoch

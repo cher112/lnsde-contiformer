@@ -56,7 +56,6 @@ coverage.xml
 *.pot
 
 # Django stuff:
-*.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -124,26 +123,6 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# PyTorch model checkpoints
-*.pth
-*.pt
-*.pkl
-
-# Training outputs
-logs/
-checkpoints/
-results/
-outputs/
-
-# Data files
-data/
-*.csv
-*.h5
-*.hdf5
 
 # Temporary files
 *.tmp
