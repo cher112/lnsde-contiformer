@@ -49,8 +49,8 @@ def parse_args():
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='权重衰减')
     
     # 模型架构参数 - 增大以提高准确率和GPU利用率
-    parser.add_argument('--hidden_channels', type=int, default=256, help='SDE隐藏维度（增大）')
-    parser.add_argument('--contiformer_dim', type=int, default=512, help='ContiFormer维度（增大）')
+    parser.add_argument('--hidden_channels', type=int, default=128, help='SDE隐藏维度（增大）')
+    parser.add_argument('--contiformer_dim', type=int, default=256, help='ContiFormer维度（增大）')
     parser.add_argument('--n_heads', type=int, default=16, help='注意力头数')
     parser.add_argument('--n_layers', type=int, default=8, help='编码器层数')
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout率')
@@ -65,7 +65,7 @@ def parse_args():
     # Linear Noise SDE特有参数
     parser.add_argument('--enable_gradient_detach', action='store_true',
                        help='是否启用每N步梯度断开（防止RecursionError）')
-    parser.add_argument('--detach_interval', type=int, default=10,
+    parser.add_argument('--detach_interval', type=int, default=50,
                        help='梯度断开间隔步数')
     
     # 损失函数参数
@@ -77,7 +77,10 @@ def parse_args():
                        help='Focal Loss alpha参数')
     
     # 系统参数
-    parser.add_argument('--device', type=str, default='auto', help='计算设备 (auto/cpu/cuda)')
+    parser.add_argument('--device', type=str, default='auto', 
+                       help='计算设备 (auto/cpu/cuda/cuda:0/cuda:1/cuda:2 等)')
+    parser.add_argument('--gpu_id', type=int, default=-1, 
+                       help='指定GPU ID (-1为自动选择空闲GPU，>=0为指定GPU)')
     parser.add_argument('--num_workers', type=int, default=4, help='数据加载进程数（避免CPU瓶颈）')
     parser.add_argument('--use_amp', action='store_true', default=True, help='启用混合精度训练（提高GPU利用率）')
     parser.add_argument('--seed', type=int, default=42, help='随机种子')
@@ -95,7 +98,7 @@ def main():
     # 1. 解析参数和基础设置
     args = parse_args()
     set_seed(args.seed)
-    device = get_device(args.device)
+    device = get_device(args.device, args.gpu_id)
     
     # 2. 配置设置
     args = setup_dataset_mapping(args)
