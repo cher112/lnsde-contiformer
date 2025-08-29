@@ -40,7 +40,7 @@ def parse_args():
                        help='SDE模型类型 (1:langevin, 2:linear_noise, 3:geometric)')
     
     # 模型加载选项
-    parser.add_argument('--load_model', type=int, default=2,
+    parser.add_argument('--load_model', type=int, default=1,
                        choices=[0, 1, 2],
                        help='模型加载选项 (0:不加载, 1:加载最新, 2:加载最优)')
     
@@ -54,11 +54,11 @@ def parse_args():
     
     # 训练参数 - 准确率优先设置
     parser.add_argument('--batch_size', type=int, default=64, help='批大小（优化GPU利用率）')
-    parser.add_argument('--epochs', type=int, default=100, help='训练轮数')
+    parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='学习率')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='权重衰减')
     
-    # 模型架构参数 - 修正为与ASAS-80模型匹配的参数
+    # 模型架构参数 
     parser.add_argument('--hidden_channels', type=int, default=128, help='SDE隐藏维度（增大）')
     parser.add_argument('--contiformer_dim', type=int, default=128, help='ContiFormer维度（增大）')
     parser.add_argument('--n_heads', type=int, default=8, help='注意力头数')
