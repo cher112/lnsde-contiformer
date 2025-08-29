@@ -35,7 +35,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Neural SDE + ContiFormer Training')
     
     # 模型选择
-    parser.add_argument('--model_type', type=int, default=1,
+    parser.add_argument('--model_type', type=int, default=3,
                        choices=[1, 2, 3],
                        help='SDE模型类型 (1:langevin, 2:linear_noise, 3:geometric)')
     
