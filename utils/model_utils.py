@@ -173,9 +173,10 @@ def load_model_checkpoint(model, optimizer, args, load_type):
         
         # 返回相关信息
         best_val_acc = checkpoint.get('best_val_accuracy', checkpoint.get('accuracy', 0.0))
-        start_epoch = checkpoint.get('epoch', 0) + 1 if load_type == 1 else 0
+        loaded_epoch = checkpoint.get('epoch', 0)
+        start_epoch = loaded_epoch + 1 if load_type == 1 else 0
         
-        print(f"✓ 加载完成 - 最佳验证精度: {best_val_acc:.4f}, 开始轮次: {start_epoch}")
+        print(f"✓ 加载完成 - 已完成轮次: {loaded_epoch + 1}, 最佳验证精度: {best_val_acc:.4f}, 继续从轮次: {start_epoch + 1}")
         return best_val_acc, start_epoch
         
     except Exception as e:

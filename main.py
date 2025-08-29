@@ -35,12 +35,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Neural SDE + ContiFormer Training')
     
     # 模型选择
-    parser.add_argument('--model_type', type=int, default=2,
+    parser.add_argument('--model_type', type=int, default=3,
                        choices=[1, 2, 3],
                        help='SDE模型类型 (1:langevin, 2:linear_noise, 3:geometric)')
     
     # 模型加载选项
-    parser.add_argument('--load_model', type=int, default=1,
+    parser.add_argument('--load_model', type=int, default=2,
                        choices=[0, 1, 2],
                        help='模型加载选项 (0:不加载, 1:加载最新, 2:加载最优)')
     
@@ -53,7 +53,7 @@ def parse_args():
                        help='是否使用backup数据文件（推荐，避免SDE时间序列问题）')
     
     # 训练参数 - 准确率优先设置
-    parser.add_argument('--batch_size', type=int, default=32, help='批大小（避免OOM）')
+    parser.add_argument('--batch_size', type=int, default=64, help='批大小（优化GPU利用率）')
     parser.add_argument('--epochs', type=int, default=100, help='训练轮数')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='学习率')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='权重衰减')
@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout率')
     
     # 梯度累积参数
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=4, help='梯度累积步数（模拟更大batch size）')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=2, help='梯度累积步数（减少以提高GPU利用率）')
     
     # SDE配置
     parser.add_argument('--sde_config', type=int, default=1, choices=[1, 2, 3],
@@ -91,7 +91,7 @@ def parse_args():
                        help='计算设备 (auto/cpu/cuda/cuda:0/cuda:1/cuda:2 等)')
     parser.add_argument('--gpu_id', type=int, default=-1, 
                        help='指定GPU ID (-1为自动选择空闲GPU，>=0为指定GPU)')
-    parser.add_argument('--num_workers', type=int, default=4, help='数据加载进程数（避免CPU瓶颈）')
+    parser.add_argument('--num_workers', type=int, default=8, help='数据加载进程数（提高数据加载速度）')
     parser.add_argument('--use_amp', action='store_true', default=True, help='启用混合精度训练（提高GPU利用率）')
     parser.add_argument('--seed', type=int, default=42, help='随机种子')
     

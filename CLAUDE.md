@@ -32,7 +32,7 @@
 ### visualization/ 目录  
 用于存放数据可视化脚本：
 - `macho_merged_visualization.py` - MACHO合并数据可视化
-- 其他分析和可视化脚本
+- `universal_training_visualization_recalc.py` - 通用训练可视化(基于混淆矩阵重新计算F1/召回率)
 
 ### 规则：
 - 数据处理和合并脚本放在 `test/` 目录

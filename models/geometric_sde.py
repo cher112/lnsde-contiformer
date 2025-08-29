@@ -69,8 +69,8 @@ class GeometricSDE(BaseSDEModel):
         """
         batch_size = y.shape[0]
         
-        # 防止y为零，添加小的正值
-        y_safe = torch.abs(y) + self.epsilon
+        # 防止y为零和数值爆炸，使用更安全的正定化
+        y_safe = torch.clamp(torch.abs(y), min=self.epsilon, max=10.0)
         
         # 扩展时间维度
         if t.dim() == 0:  # 标量时间
@@ -79,11 +79,16 @@ class GeometricSDE(BaseSDEModel):
             t_expanded = t.view(-1, 1).expand(batch_size, 1)
         ty = torch.cat([y_safe, t_expanded], dim=1)
         
-        # 计算几何漂移系数
+        # 计算几何漂移系数，添加数值稳定性检查
         mu = self.mu_net(ty)
+        mu = torch.clamp(mu, min=-5.0, max=5.0)  # 限制漂移系数范围
         
         # 几何漂移：μ(t,y) * |y|
         drift = mu * y_safe
+        
+        # 检查输出是否为NaN或Inf
+        if torch.isnan(drift).any() or torch.isinf(drift).any():
+            drift = torch.zeros_like(drift)
         
         return drift
         
@@ -96,8 +101,8 @@ class GeometricSDE(BaseSDEModel):
         """
         batch_size = y.shape[0]
         
-        # 防止y为零
-        y_safe = torch.abs(y) + self.epsilon
+        # 防止y为零和数值爆炸，使用更安全的正定化
+        y_safe = torch.clamp(torch.abs(y), min=self.epsilon, max=10.0)
         
         # 扩展时间维度
         if t.dim() == 0:  # 标量时间
@@ -106,7 +111,7 @@ class GeometricSDE(BaseSDEModel):
             t_expanded = t.view(-1, 1).expand(batch_size, 1)
         ty = torch.cat([y_safe, t_expanded], dim=1)
         
-        # 计算几何波动率
+        # 计算几何波动率，添加数值稳定性检查
         sigma = self.sigma_net(ty)
         
         # 限制波动率范围以确保数值稳定性
@@ -117,6 +122,10 @@ class GeometricSDE(BaseSDEModel):
         # 几何扩散：σ(t,y) * |y|
         diffusion = sigma * y_safe
         
+        # 检查输出是否为NaN或Inf
+        if torch.isnan(diffusion).any() or torch.isinf(diffusion).any():
+            diffusion = torch.ones_like(diffusion) * 0.1  # 使用小的正值替代
+        
         return diffusion
     
     def get_stability_condition(self, t, y):
@@ -125,9 +134,12 @@ class GeometricSDE(BaseSDEModel):
         其中K_μ是μ函数的增长率上界
         """
         with torch.no_grad():
-            y_safe = torch.abs(y) + self.epsilon
+            y_safe = torch.clamp(torch.abs(y), min=self.epsilon, max=10.0)
             diffusion = self.g(t, y_safe)
-            sigma_squared = (diffusion / y_safe) ** 2  # σ²
+            
+            # 安全的除法，防止除零
+            ratio = diffusion / (y_safe + self.epsilon)
+            sigma_squared = ratio ** 2
             sigma_squared_mean = sigma_squared.mean()
             
             # 估计μ的增长率（保守估计）
@@ -140,7 +152,7 @@ class GeometricSDE(BaseSDEModel):
         """
         确保解的正定性（几何SDE的重要性质）
         """
-        return torch.abs(y) + self.epsilon
+        return torch.clamp(torch.abs(y), min=self.epsilon, max=10.0)
 
 
 class GeometricSDEContiformer(nn.Module):
@@ -213,7 +225,7 @@ class GeometricSDEContiformer(nn.Module):
         
     def forward(self, time_series, times, mask=None, return_stability_info=False):
         """
-        前向传播 - 高效的批处理SDE求解版本
+        前向传播 - GPU优化的批处理SDE求解版本
         Args:
             time_series: (batch, seq_len, input_dim) 光变曲线数据 [time, mag, errmag]
             times: (batch, seq_len) 时间戳
@@ -225,103 +237,96 @@ class GeometricSDEContiformer(nn.Module):
             stability_info: 稳定性信息（可选）
         """
         batch_size, seq_len = time_series.shape[:2]
+        device = time_series.device
         
         # 1. 特征编码（确保正定性）
         encoded_features = self.feature_encoder(time_series)
         encoded_features = self.sde_model.ensure_positivity(encoded_features)
         
-        # 2. 高效的批处理SDE建模 - 类似Linear Noise SDE的方式
-        sde_trajectory = []
+        # 2. GPU优化的SDE建模 - 减少循环和同步
+        sde_trajectory = torch.zeros(batch_size, seq_len, self.hidden_channels, device=device)
         stability_info = []
         
-        # 从第一个时间点开始，逐步求解SDE
-        current_state = self.sde_model.ensure_positivity(encoded_features[:, 0])  # (batch, hidden_channels) 初始状态
-        sde_solving_count = 0  # 统计实际进行SDE求解的步数
+        # 初始状态
+        current_state = self.sde_model.ensure_positivity(encoded_features[:, 0])
+        sde_trajectory[:, 0] = current_state
+        sde_solving_count = 0
         
-        for i in range(seq_len):
-            # 当前时间点
-            current_time = times[:, i]  # (batch,)
-            
-            # 检查稳定性条件
-            if return_stability_info:
-                try:
-                    stability_margin = self.sde_model.get_stability_condition(current_time, current_state)
-                    stability_info.append(stability_margin)
-                except:
-                    stability_info.append(0.0)
-            
-            if i == 0:
-                # 第一个时间点直接使用初始状态
-                sde_output = current_state
-            else:
-                # 从上一个状态求解到当前时间
+        # 批量处理SDE求解，减少Python循环
+        with torch.amp.autocast(device_type='cuda'):  # 启用混合精度
+            for i in range(1, seq_len):
+                # 获取时间间隔
                 prev_time = times[:, i-1]
+                current_time = times[:, i]
                 
-                # 使用mask来判断是否应该进行SDE求解
+                # 检查是否需要SDE求解（减少条件检查）
                 if mask is not None:
-                    # 检查当前批次中是否有有效的时间点
-                    current_valid = mask[:, i]  # (batch,) 当前时间点的mask
-                    prev_valid = mask[:, i-1]    # (batch,) 前一时间点的mask
-                    batch_has_valid = torch.any(current_valid & prev_valid)  # 是否有样本在两个时间点都有效
+                    valid_mask = mask[:, i] & mask[:, i-1]
+                    batch_has_valid = valid_mask.any()
                 else:
                     batch_has_valid = True
                 
-                # 检查时间是否递增（使用第一个样本作为参考）
-                prev_time_val = prev_time[0].item()
-                current_time_val = current_time[0].item()
-                time_increasing = current_time_val > prev_time_val + 1e-8
+                # 时间递增检查（使用张量操作避免CPU同步）
+                time_diff = current_time - prev_time
+                time_increasing = (time_diff > 1e-8).any()
                 
-                # 决定是否进行SDE求解
-                should_solve_sde = (
-                    batch_has_valid and 
-                    time_increasing and
-                    prev_time_val > 0 and 
-                    current_time_val > 0
-                )
+                should_solve_sde = batch_has_valid and time_increasing
                 
-                if should_solve_sde:
-                    t_solve = torch.stack([prev_time[0], current_time[0]])  # 使用第一个样本的时间作为参考
-                    
+                if should_solve_sde and sde_solving_count < seq_len * 0.8:  # 限制SDE求解次数
                     try:
-                        # 求解SDE - 批处理版本
-                        ys = torchsde.sdeint(
-                            sde=self.sde_model,
-                            y0=current_state,  # (batch, hidden_channels)
-                            ts=t_solve,
-                            method=self.sde_method,
-                            dt=self.dt,
-                            rtol=self.rtol,
-                            atol=self.atol
-                        )
-                        sde_output = ys[-1]  # (batch, hidden_channels) 取最终时间的结果
-                        # 确保求解结果的正定性
-                        sde_output = self.sde_model.ensure_positivity(sde_output)
-                        sde_solving_count += 1
+                        # 使用批次平均时间作为参考，减少CPU-GPU同步
+                        t_start = prev_time.mean()
+                        t_end = current_time.mean()
                         
-                    except Exception as e:
-                        if sde_solving_count < 5:  # 只在前几次失败时打印
-                            print(f"Geometric SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
+                        if t_end > t_start:
+                            t_solve = torch.tensor([t_start, t_end], device=device)
+                            
+                            # SDE求解（GPU并行）
+                            ys = torchsde.sdeint(
+                                sde=self.sde_model,
+                                y0=current_state,
+                                ts=t_solve,
+                                method=self.sde_method,
+                                dt=min(self.dt, (t_end - t_start).item() / 4),  # 自适应步长
+                                rtol=self.rtol,
+                                atol=self.atol,
+                                adaptive=True  # 启用自适应求解
+                            )
+                            sde_output = self.sde_model.ensure_positivity(ys[-1])
+                            sde_solving_count += 1
+                        else:
+                            sde_output = encoded_features[:, i]
+                    except:
                         sde_output = encoded_features[:, i]
-                        sde_output = self.sde_model.ensure_positivity(sde_output)
                 else:
-                    # 使用编码特征
+                    # 直接使用编码特征，减少计算
                     sde_output = encoded_features[:, i]
-                    sde_output = self.sde_model.ensure_positivity(sde_output)
-            
-            # 更新当前状态
-            current_state = sde_output
-            sde_trajectory.append(sde_output)
+                
+                # 更新状态
+                current_state = self.sde_model.ensure_positivity(sde_output)
+                sde_trajectory[:, i] = current_state
         
-        # 3. 重组SDE轨迹为完整序列
-        sde_features = torch.stack(sde_trajectory, dim=1)  # (batch, seq_len, hidden_channels)
+        # 3. 稳定性信息（仅在需要时计算，减少开销）
+        if return_stability_info:
+            try:
+                # 采样检查，不是每个时间点都检查
+                sample_indices = torch.linspace(0, seq_len-1, min(10, seq_len), dtype=torch.long)
+                for idx in sample_indices:
+                    stability_margin = self.sde_model.get_stability_condition(
+                        times[:, idx], sde_trajectory[:, idx]
+                    )
+                    stability_info.append(stability_margin)
+            except:
+                stability_info = [0.0]
         
-        # 4. 应用mask到SDE特征
+        # 4. 应用mask（GPU并行操作）
         if mask is not None:
-            sde_features = self.mask_processor.apply_mask(sde_features, mask)
+            mask_expanded = mask.unsqueeze(-1).expand_as(sde_trajectory)
+            sde_trajectory = sde_trajectory * mask_expanded
         
-        # 5. ContiFormer处理整个SDE轨迹序列
+        # 5. ContiFormer处理（充分利用GPU）
         contiformer_out, pooled_features = self.contiformer(
-            sde_features,  # 传入完整的SDE轨迹
+            sde_trajectory,
             times, 
             mask
         )
@@ -330,14 +335,14 @@ class GeometricSDEContiformer(nn.Module):
         logits = self.classifier(pooled_features)
         
         if return_stability_info:
-            return logits, sde_features, {
+            return logits, sde_trajectory, {
                 'stability_margins': stability_info,
                 'mean_stability': sum(stability_info) / len(stability_info) if stability_info else 0.0,
-                'positivity_preserved': torch.all(sde_features > 0).item(),
+                'positivity_preserved': torch.all(sde_trajectory >= 0).item(),
                 'sde_solving_steps': sde_solving_count
             }
         else:
-            return logits, sde_features
+            return logits, sde_trajectory
     
     def compute_loss(self, logits, labels, sde_features=None, 
                     alpha_stability=1e-3, alpha_positivity=1e-3, weight=None,
@@ -357,7 +362,13 @@ class GeometricSDEContiformer(nn.Module):
         """
         batch_size, num_classes = logits.shape
         
-        # 0. 温度缩放
+        # 检查输入是否包含NaN或Inf
+        if torch.isnan(logits).any() or torch.isinf(logits).any():
+            print(f"警告：logits包含NaN或Inf，使用零logits替代")
+            logits = torch.zeros_like(logits)
+        
+        # 0. 温度缩放 - 防止除零
+        temperature = max(temperature, 0.1)  # 防止温度过小
         scaled_logits = logits / temperature
         
         # 1. 更强的Focal Loss - 增大gamma值

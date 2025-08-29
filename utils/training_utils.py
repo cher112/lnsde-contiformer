@@ -305,13 +305,13 @@ def calculate_additional_metrics(predictions, labels, probas=None, compute_confu
     metrics = {}
     
     try:
-        # F1 Score (macro平均)
-        f1_macro = f1_score(labels, predictions, average='macro')
-        metrics['f1_score'] = f1_macro * 100  # 转为百分比
+        # F1 Score (原始分数，不使用平均)
+        f1_scores = f1_score(labels, predictions, average=None)
+        metrics['f1_score'] = f1_scores.mean() * 100  # 转为百分比
         
-        # Recall (macro平均)
-        recall_macro = recall_score(labels, predictions, average='macro')
-        metrics['recall'] = recall_macro * 100  # 转为百分比
+        # Recall (原始分数，不使用平均)
+        recall_scores = recall_score(labels, predictions, average=None)
+        metrics['recall'] = recall_scores.mean() * 100  # 转为百分比
         
         # 混淆矩阵（仅在需要时计算）
         if compute_confusion:
