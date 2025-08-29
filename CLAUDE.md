@@ -100,6 +100,30 @@ configure_chinese_font()
 - 确保图片集中管理和存储
 - 提供字体后备机制，确保在不同环境下的兼容性
 
+## 版本控制默认策略
+
+### 默认提交所有实验产出
+**所有训练和实验产生的文件都必须纳入版本控制**：
+- 训练日志文件 (`*.log`)
+- 模型权重文件 (`*.pth`) 
+- 可视化图表 (`*.png`)
+- 配置文件和参数记录
+- 实验数据和结果
+
+### 主动版本管理
+**有文件修改时默认主动提交**：
+- 自动检查git状态
+- 添加所有修改和新文件
+- 创建有意义的提交信息
+- 完成提交操作
+- 无需用户额外确认
+
+### 目的：
+- 确保实验进度完整记录和可追溯
+- 便于实验复现和结果对比
+- 支持模型版本回滚和管理
+- 促进团队协作和知识共享
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
