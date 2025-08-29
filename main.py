@@ -35,7 +35,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Neural SDE + ContiFormer Training')
     
     # 模型选择
-    parser.add_argument('--model_type', type=int, default=3,
+    parser.add_argument('--model_type', type=int, default=1,
                        choices=[1, 2, 3],
                        help='SDE模型类型 (1:langevin, 2:linear_noise, 3:geometric)')
     
@@ -45,7 +45,7 @@ def parse_args():
                        help='模型加载选项 (0:不加载, 1:加载最新, 2:加载最优)')
     
     # 数据相关 - 使用数字代表数据集
-    parser.add_argument('--dataset', type=int, default=1,
+    parser.add_argument('--dataset', type=int, default=2,
                        choices=[1, 2, 3],
                        help='数据集选择: 1=ASAS, 2=LINEAR, 3=MACHO')
     
@@ -97,7 +97,7 @@ def parse_args():
     
     # 保存和日志参数 - 使用标准化路径管理
     parser.add_argument('--base_dir', type=str, default='./results', help='结果保存基目录')
-    parser.add_argument('--save_interval', type=int, default=20, help='模型保存间隔(epochs)')
+    parser.add_argument('--save_interval', type=int, default=10, help='模型保存间隔(epochs)')
     
     return parser.parse_args()
 

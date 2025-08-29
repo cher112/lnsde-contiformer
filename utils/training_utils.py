@@ -162,7 +162,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
             pbar.set_postfix({
                 'Loss': f'{current_loss:.4f}',
                 'Acc': f'{current_acc:.2f}%',
-                'F1': f'{batch_metrics["f1_score"]:.1f}%'
+                '加权F1': f'{batch_metrics["f1_score"]:.1f}%'
             })
     
     # 移除多余输出，直接计算最终指标
@@ -298,20 +298,18 @@ def calculate_class_accuracy(predictions, labels):
 
 
 def calculate_additional_metrics(predictions, labels, probas=None, compute_confusion=False):
-    """计算额外的评价指标：F1, Recall，可选混淆矩阵"""
+    """计算额外的评价指标：加权平均F1, 加权平均Recall，可选混淆矩阵"""
     predictions = np.array(predictions)
     labels = np.array(labels)
     
     metrics = {}
     
     try:
-        # F1 Score (原始分数，不使用平均)
-        f1_scores = f1_score(labels, predictions, average=None)
-        metrics['f1_score'] = f1_scores.mean() * 100  # 转为百分比
+        # F1 Score (加权平均)
+        metrics['f1_score'] = f1_score(labels, predictions, average='weighted') * 100  # 转为百分比
         
-        # Recall (原始分数，不使用平均)
-        recall_scores = recall_score(labels, predictions, average=None)
-        metrics['recall'] = recall_scores.mean() * 100  # 转为百分比
+        # Recall (加权平均)
+        metrics['recall'] = recall_score(labels, predictions, average='weighted') * 100  # 转为百分比
         
         # 混淆矩阵（仅在需要时计算）
         if compute_confusion:

@@ -48,15 +48,15 @@ def update_log(log_path, log_data, epoch, train_loss, train_acc, val_loss, val_a
         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # 添加训练额外指标
+    # 添加训练额外指标 (加权平均)
     if train_metrics is not None:
-        epoch_data['train_f1'] = float(train_metrics['f1_score'])
-        epoch_data['train_recall'] = float(train_metrics['recall'])
+        epoch_data['train_f1'] = float(train_metrics['f1_score'])  # 加权平均F1
+        epoch_data['train_recall'] = float(train_metrics['recall'])  # 加权平均Recall
     
-    # 添加验证额外指标
+    # 添加验证额外指标 (加权平均)
     if val_metrics is not None:
-        epoch_data['val_f1'] = float(val_metrics['f1_score'])
-        epoch_data['val_recall'] = float(val_metrics['recall'])
+        epoch_data['val_f1'] = float(val_metrics['f1_score'])  # 加权平均F1
+        epoch_data['val_recall'] = float(val_metrics['recall'])  # 加权平均Recall
         
         # 如果有混淆矩阵，也保存它
         if 'confusion_matrix' in val_metrics and val_metrics['confusion_matrix']:
@@ -87,13 +87,13 @@ def print_epoch_summary(epoch, total_epochs, train_loss, train_acc, val_loss, va
     # 训练指标
     train_info = f"  训练 - Loss: {train_loss:.4f}, Acc: {train_acc:.2f}%"
     if train_metrics:
-        train_info += f", F1: {train_metrics['f1_score']:.1f}, Recall: {train_metrics['recall']:.1f}"
+        train_info += f", 加权F1: {train_metrics['f1_score']:.1f}, 加权Recall: {train_metrics['recall']:.1f}"
     print(train_info)
     
     # 验证指标
     val_info = f"  验证 - Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%"
     if val_metrics:
-        val_info += f", F1: {val_metrics['f1_score']:.1f}, Recall: {val_metrics['recall']:.1f}"
+        val_info += f", 加权F1: {val_metrics['f1_score']:.1f}, 加权Recall: {val_metrics['recall']:.1f}"
     print(val_info)
     
     if lr is not None:
