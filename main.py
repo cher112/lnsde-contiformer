@@ -106,7 +106,7 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=42, help='随机种子')
     
     # 保存和日志参数 - 使用标准化路径管理
-    parser.add_argument('--base_dir', type=str, default='/autodl-fs/data/lnsde-contiformer/results', help='结果保存基目录')
+    parser.add_argument('--base_dir', type=str, default='/root/autodl-fs/lnsde-contiformer/results', help='结果保存基目录')
     parser.add_argument('--save_interval', type=int, default=10, help='模型保存间隔(epochs)')
     
     return parser.parse_args()
