@@ -142,3 +142,7 @@ dmypy.json
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Large data and result files - stored in autodl-fs
+data/
+results/
