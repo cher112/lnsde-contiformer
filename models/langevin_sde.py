@@ -118,7 +118,10 @@ class LangevinSDEContiformer(nn.Module):
                  sde_method='euler',
                  dt=0.01,
                  rtol=1e-3,
-                 atol=1e-4):
+                 atol=1e-4,
+                 # 组件开关参数
+                 use_sde=1,
+                 use_contiformer=1):
         super().__init__()
         
         self.input_dim = input_dim
@@ -128,6 +131,8 @@ class LangevinSDEContiformer(nn.Module):
         self.sde_method = sde_method
         self.rtol = rtol
         self.atol = atol
+        self.use_sde = bool(use_sde)
+        self.use_contiformer = bool(use_contiformer)
         
         # 输入特征编码器
         self.feature_encoder = nn.Sequential(
@@ -137,28 +142,36 @@ class LangevinSDEContiformer(nn.Module):
             nn.Dropout(dropout)
         )
         
-        # Langevin SDE模块
-        self.sde_model = LangevinSDE(
-            input_channels=input_dim,
-            hidden_channels=hidden_channels, 
-            output_channels=hidden_channels
-        )
+        # 根据开关创建Langevin SDE模块
+        if self.use_sde:
+            self.sde_model = LangevinSDE(
+                input_channels=input_dim,
+                hidden_channels=hidden_channels, 
+                output_channels=hidden_channels
+            )
+        else:
+            self.sde_model = None
         
-        # ContiFormer模块
-        self.contiformer = ContiFormerModule(
-            input_dim=hidden_channels,
-            d_model=contiformer_dim,
-            n_heads=n_heads,
-            n_layers=n_layers,
-            dropout=dropout
-        )
+        # 根据开关创建ContiFormer模块
+        if self.use_contiformer:
+            self.contiformer = ContiFormerModule(
+                input_dim=hidden_channels,
+                d_model=contiformer_dim,
+                n_heads=n_heads,
+                n_layers=n_layers,
+                dropout=dropout
+            )
+            classifier_input_dim = contiformer_dim
+        else:
+            self.contiformer = None
+            classifier_input_dim = hidden_channels
         
-        # 分类头
+        # 分类头 - 输入维度根据是否使用ContiFormer动态调整
         self.classifier = nn.Sequential(
-            nn.Linear(contiformer_dim, contiformer_dim // 2),
+            nn.Linear(classifier_input_dim, classifier_input_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(contiformer_dim // 2, num_classes)
+            nn.Linear(classifier_input_dim // 2, num_classes)
         )
         
         # Mask处理器
@@ -166,24 +179,60 @@ class LangevinSDEContiformer(nn.Module):
         
     def forward(self, time_series, times, mask=None):
         """
-        前向传播 - 高效的批处理SDE求解版本
+        前向传播 - 支持模块化组件开关
         Args:
             time_series: (batch, seq_len, input_dim) 光变曲线数据 [time, mag, errmag]
             times: (batch, seq_len) 时间戳
             mask: (batch, seq_len) mask, True表示有效位置
         Returns:
             logits: (batch, num_classes) 分类logits
-            sde_features: (batch, seq_len, hidden_channels) SDE特征
+            features: (batch, seq_len, hidden_channels) 特征序列
         """
         batch_size, seq_len = time_series.shape[:2]
         
-        # 1. 使用原始特征编码作为SDE的基础状态
+        # 1. 基础特征编码
         encoded_features = self.feature_encoder(time_series)  # (batch, seq_len, hidden_channels)
         
-        # 2. 高效的批处理SDE建模 - 类似Linear Noise SDE的方式
-        sde_trajectory = []
+        # 2. SDE建模（如果启用）
+        if self.use_sde and self.sde_model is not None:
+            sde_features = self._apply_sde_processing(encoded_features, times, mask, seq_len)
+        else:
+            sde_features = encoded_features
         
-        # 从第一个时间点开始，逐步求解SDE
+        # 3. 应用mask（如果提供）
+        if mask is not None:
+            sde_features = self.mask_processor.apply_mask(sde_features, mask)
+        
+        # 4. ContiFormer处理（如果启用）
+        if self.use_contiformer and self.contiformer is not None:
+            contiformer_out, pooled_features = self.contiformer(
+                sde_features,
+                times, 
+                mask
+            )
+            final_features = pooled_features
+        else:
+            # 不使用ContiFormer时，直接对特征序列进行全局平均池化
+            if mask is not None:
+                # 考虑mask的平均池化
+                mask_expanded = mask.unsqueeze(-1).expand_as(sde_features)
+                masked_features = sde_features * mask_expanded.float()
+                valid_lengths = mask.sum(dim=1, keepdim=True).float()  # (batch, 1)
+                final_features = masked_features.sum(dim=1) / (valid_lengths + 1e-8)  # (batch, hidden_channels)
+            else:
+                # 简单全局平均池化
+                final_features = sde_features.mean(dim=1)  # (batch, hidden_channels)
+        
+        # 5. 分类
+        logits = self.classifier(final_features)
+        
+        return logits, sde_features
+    
+    def _apply_sde_processing(self, encoded_features, times, mask, seq_len):
+        """
+        应用SDE处理 - 从原始forward函数提取的SDE处理逻辑
+        """
+        sde_trajectory = []
         current_state = encoded_features[:, 0]  # (batch, hidden_channels) 初始状态
         sde_solving_count = 0  # 统计实际进行SDE求解的步数
         
@@ -249,24 +298,9 @@ class LangevinSDEContiformer(nn.Module):
             current_state = sde_output
             sde_trajectory.append(sde_output)
         
-        # 3. 重组SDE轨迹为完整序列
+        # 重组SDE轨迹为完整序列
         sde_features = torch.stack(sde_trajectory, dim=1)  # (batch, seq_len, hidden_channels)
-        
-        # 4. 应用mask
-        if mask is not None:
-            sde_features = self.mask_processor.apply_mask(sde_features, mask)
-        
-        # 5. ContiFormer处理整个SDE轨迹序列
-        contiformer_out, pooled_features = self.contiformer(
-            sde_features,  # 传入完整的SDE轨迹
-            times, 
-            mask
-        )
-        
-        # 6. 分类
-        logits = self.classifier(pooled_features)
-        
-        return logits, sde_features
+        return sde_features
     
     def compute_loss(self, logits, labels, sde_features=None, alpha_stability=1e-4, 
                      weight=None, focal_alpha=0.25, focal_gamma=4.0, label_smoothing=0.3, temperature=0.5):

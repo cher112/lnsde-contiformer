@@ -176,7 +176,10 @@ class GeometricSDEContiformer(nn.Module):
                  sde_method='euler',
                  dt=0.01,
                  rtol=1e-3,
-                 atol=1e-4):
+                 atol=1e-4,
+                 # 组件开关参数
+                 use_sde=1,
+                 use_contiformer=1):
         super().__init__()
         
         self.input_dim = input_dim
@@ -186,6 +189,8 @@ class GeometricSDEContiformer(nn.Module):
         self.sde_method = sde_method
         self.rtol = rtol
         self.atol = atol
+        self.use_sde = bool(use_sde)
+        self.use_contiformer = bool(use_contiformer)
         
         # 输入特征编码器（确保输出为正）
         self.feature_encoder = nn.Sequential(
@@ -196,28 +201,36 @@ class GeometricSDEContiformer(nn.Module):
             nn.Softplus()  # 进一步确保正定性
         )
         
-        # Geometric SDE模块
-        self.sde_model = GeometricSDE(
-            input_channels=input_dim,
-            hidden_channels=hidden_channels,
-            output_channels=hidden_channels
-        )
+        # 根据开关创建Geometric SDE模块
+        if self.use_sde:
+            self.sde_model = GeometricSDE(
+                input_channels=input_dim,
+                hidden_channels=hidden_channels,
+                output_channels=hidden_channels
+            )
+        else:
+            self.sde_model = None
         
-        # ContiFormer模块
-        self.contiformer = ContiFormerModule(
-            input_dim=hidden_channels,
-            d_model=contiformer_dim,
-            n_heads=n_heads,
-            n_layers=n_layers,
-            dropout=dropout
-        )
+        # 根据开关创建ContiFormer模块
+        if self.use_contiformer:
+            self.contiformer = ContiFormerModule(
+                input_dim=hidden_channels,
+                d_model=contiformer_dim,
+                n_heads=n_heads,
+                n_layers=n_layers,
+                dropout=dropout
+            )
+            classifier_input_dim = contiformer_dim
+        else:
+            self.contiformer = None
+            classifier_input_dim = hidden_channels
         
-        # 分类头
+        # 分类头 - 输入维度根据是否使用ContiFormer动态调整
         self.classifier = nn.Sequential(
-            nn.Linear(contiformer_dim, contiformer_dim // 2),
+            nn.Linear(classifier_input_dim, classifier_input_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(contiformer_dim // 2, num_classes)
+            nn.Linear(classifier_input_dim // 2, num_classes)
         )
         
         # Mask处理器
@@ -225,7 +238,7 @@ class GeometricSDEContiformer(nn.Module):
         
     def forward(self, time_series, times, mask=None, return_stability_info=False):
         """
-        前向传播 - GPU优化的批处理SDE求解版本
+        前向传播 - 支持模块化组件开关
         Args:
             time_series: (batch, seq_len, input_dim) 光变曲线数据 [time, mag, errmag]
             times: (batch, seq_len) 时间戳
@@ -233,17 +246,68 @@ class GeometricSDEContiformer(nn.Module):
             return_stability_info: 是否返回稳定性信息
         Returns:
             logits: (batch, num_classes) 分类logits
-            sde_features: (batch, seq_len, hidden_channels) SDE特征
+            features: (batch, seq_len, hidden_channels) 特征序列
             stability_info: 稳定性信息（可选）
         """
         batch_size, seq_len = time_series.shape[:2]
-        device = time_series.device
         
-        # 1. 特征编码（确保正定性）
-        encoded_features = self.feature_encoder(time_series)
-        encoded_features = self.sde_model.ensure_positivity(encoded_features)
+        # 1. 基础特征编码
+        encoded_features = self.feature_encoder(time_series)  # (batch, seq_len, hidden_channels)
         
-        # 2. GPU优化的SDE建模 - 减少循环和同步
+        # 2. SDE建模（如果启用）
+        if self.use_sde and self.sde_model is not None:
+            sde_features, stability_info = self._apply_sde_processing(
+                encoded_features, times, mask, seq_len, return_stability_info
+            )
+        else:
+            sde_features = encoded_features
+            stability_info = []
+        
+        # 3. 应用mask（如果提供）
+        if mask is not None:
+            sde_features = self.mask_processor.apply_mask(sde_features, mask)
+        
+        # 4. ContiFormer处理（如果启用）
+        if self.use_contiformer and self.contiformer is not None:
+            contiformer_out, pooled_features = self.contiformer(
+                sde_features,
+                times, 
+                mask
+            )
+            final_features = pooled_features
+        else:
+            # 不使用ContiFormer时，直接对特征序列进行全局平均池化
+            if mask is not None:
+                # 考虑mask的平均池化
+                mask_expanded = mask.unsqueeze(-1).expand_as(sde_features)
+                masked_features = sde_features * mask_expanded.float()
+                valid_lengths = mask.sum(dim=1, keepdim=True).float()  # (batch, 1)
+                final_features = masked_features.sum(dim=1) / (valid_lengths + 1e-8)  # (batch, hidden_channels)
+            else:
+                # 简单全局平均池化
+                final_features = sde_features.mean(dim=1)  # (batch, hidden_channels)
+        
+        # 5. 分类
+        logits = self.classifier(final_features)
+        
+        if return_stability_info:
+            return logits, sde_features, {
+                'stability_margins': stability_info,
+                'mean_stability': sum(stability_info) / len(stability_info) if stability_info else 0.0,
+                'positivity_preserved': torch.all(sde_features >= 0).item() if self.use_sde else True,
+                'sde_solving_steps': len(stability_info)
+            }
+        else:
+            return logits, sde_features
+    
+    def _apply_sde_processing(self, encoded_features, times, mask, seq_len, return_stability_info):
+        """
+        应用SDE处理 - 从原始forward函数提取的SDE处理逻辑
+        """
+        batch_size = encoded_features.shape[0]
+        device = encoded_features.device
+        
+        # GPU优化的SDE建模 - 减少循环和同步
         sde_trajectory = torch.zeros(batch_size, seq_len, self.hidden_channels, device=device)
         stability_info = []
         
@@ -253,7 +317,7 @@ class GeometricSDEContiformer(nn.Module):
         sde_solving_count = 0
         
         # 批量处理SDE求解，减少Python循环
-        with torch.amp.autocast(device_type='cuda'):  # 启用混合精度
+        with torch.amp.autocast(device_type='cuda', enabled=device.type == 'cuda'):  # 启用混合精度
             for i in range(1, seq_len):
                 # 获取时间间隔
                 prev_time = times[:, i-1]
@@ -306,7 +370,7 @@ class GeometricSDEContiformer(nn.Module):
                 current_state = self.sde_model.ensure_positivity(sde_output)
                 sde_trajectory[:, i] = current_state
         
-        # 3. 稳定性信息（仅在需要时计算，减少开销）
+        # 稳定性信息（仅在需要时计算，减少开销）
         if return_stability_info:
             try:
                 # 采样检查，不是每个时间点都检查
@@ -319,30 +383,7 @@ class GeometricSDEContiformer(nn.Module):
             except:
                 stability_info = [0.0]
         
-        # 4. 应用mask（GPU并行操作）
-        if mask is not None:
-            mask_expanded = mask.unsqueeze(-1).expand_as(sde_trajectory)
-            sde_trajectory = sde_trajectory * mask_expanded
-        
-        # 5. ContiFormer处理（充分利用GPU）
-        contiformer_out, pooled_features = self.contiformer(
-            sde_trajectory,
-            times, 
-            mask
-        )
-        
-        # 6. 分类
-        logits = self.classifier(pooled_features)
-        
-        if return_stability_info:
-            return logits, sde_trajectory, {
-                'stability_margins': stability_info,
-                'mean_stability': sum(stability_info) / len(stability_info) if stability_info else 0.0,
-                'positivity_preserved': torch.all(sde_trajectory >= 0).item(),
-                'sde_solving_steps': sde_solving_count
-            }
-        else:
-            return logits, sde_trajectory
+        return sde_trajectory, stability_info
     
     def compute_loss(self, logits, labels, sde_features=None, 
                     alpha_stability=1e-3, alpha_positivity=1e-3, weight=None,

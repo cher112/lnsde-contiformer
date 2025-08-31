@@ -9,14 +9,47 @@ from datetime import datetime
 from .path_manager import get_log_path
 
 
-def setup_logging(timestamp_dir, dataset_name, model_type, sde_config):
+def setup_logging(timestamp_dir, dataset_name, model_type, sde_config, args=None):
     """设置日志记录 - 使用新的时间戳目录结构"""
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
     date_str = now.strftime("%Y%m%d")
     
+    # 构建包含模型参数的日志文件名
+    if args is not None:
+        # 基础模型类型映射
+        base_model_map = {1: 'langevin', 2: 'linear_noise', 3: 'geometric'}
+        base_model = base_model_map.get(model_type, f'model{model_type}')
+        
+        # 组件开关状态
+        use_sde = getattr(args, 'use_sde', 1)
+        use_contiformer = getattr(args, 'use_contiformer', 1)
+        
+        # 根据组件开关组合确定完整模型类型
+        if use_sde and use_contiformer:
+            model_name = f"{base_model}_sde_cf"  # 完整模型
+        elif use_sde and not use_contiformer:
+            model_name = f"{base_model}_sde_only"  # 只有SDE
+        elif not use_sde and use_contiformer:
+            model_name = "contiformer_only"   # 只有ContiFormer，不需要SDE类型
+        else:
+            model_name = "baseline"  # 基础模型，不需要SDE类型
+        
+        # 关键参数信息
+        lr = getattr(args, 'learning_rate', 1e-4)
+        batch_size = getattr(args, 'batch_size', 64)
+        hidden_channels = getattr(args, 'hidden_channels', 128)
+        contiformer_dim = getattr(args, 'contiformer_dim', 128)
+        
+        # 构建详细文件名
+        filename = (f"{dataset_name}_{model_name}_config{sde_config}"
+                   f"_lr{lr:.0e}_bs{batch_size}_hc{hidden_channels}_cd{contiformer_dim}.log")
+    else:
+        # 保持原有格式作为后备
+        filename = f"{dataset_name}_{model_type}_config{sde_config}.log"
+    
     # 使用新的路径管理获取日志路径
-    log_path = os.path.join(timestamp_dir, "logs", f"{dataset_name}_{model_type}_config{sde_config}.log")
+    log_path = os.path.join(timestamp_dir, "logs", filename)
     
     # 确保目录存在
     os.makedirs(os.path.dirname(log_path), exist_ok=True)

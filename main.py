@@ -35,7 +35,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Neural SDE + ContiFormer Training')
     
     # 模型选择
-    parser.add_argument('--model_type', type=int, default=3,
+    parser.add_argument('--model_type', type=int, default=2,
                        choices=[1, 2, 3],
                        help='SDE模型类型 (1:langevin, 2:linear_noise, 3:geometric)')
     
@@ -72,6 +72,14 @@ def parse_args():
     parser.add_argument('--sde_config', type=int, default=1, choices=[1, 2, 3],
                        help='SDE配置: 1=准确率优先, 2=平衡, 3=时间优先')
     
+    # 组件开关选项
+    parser.add_argument('--use_sde', type=int, default=1, choices=[0, 1],
+                       help='是否使用SDE组件 (0=不使用, 1=使用)')
+    parser.add_argument('--use_contiformer', type=int, default=1, choices=[0, 1], 
+                       help='是否使用ContiFormer组件 (0=不使用, 1=使用)')
+    
+    # 注意：当use_sde=0且use_contiformer=0时，模型将只使用基础特征编码器和分类器
+    
     # Linear Noise SDE特有参数
     parser.add_argument('--enable_gradient_detach', action='store_true',
                        help='是否启用每N步梯度断开（防止RecursionError）')
@@ -85,6 +93,8 @@ def parse_args():
                        help='Focal Loss gamma参数（None时使用数据集默认值）')
     parser.add_argument('--focal_alpha', type=float, default=None,
                        help='Focal Loss alpha参数')
+    parser.add_argument('--min_time_interval', type=float, default=None,
+                       help='最小时间间隔（跳过小于此间隔的数据点）')
     
     # 系统参数
     parser.add_argument('--device', type=str, default='auto', 
@@ -172,7 +182,7 @@ def main():
     
     # 8. 设置日志
     print("=== 设置日志 ===")
-    log_path, log_data = setup_logging(args.log_dir, args.dataset_name, args.model_type, args.sde_config)
+    log_path, log_data = setup_logging(args.log_dir, args.dataset_name, args.model_type, args.sde_config, args)
     
     # 9. 开始训练
     training_manager = TrainingManager(

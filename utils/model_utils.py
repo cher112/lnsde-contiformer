@@ -36,7 +36,9 @@ def create_model(model_type, num_classes, args, dataset_config):
         'sde_method': args.sde_method,
         'dt': args.dt,
         'rtol': args.rtol,
-        'atol': args.atol
+        'atol': args.atol,
+        'use_sde': args.use_sde,
+        'use_contiformer': args.use_contiformer
     }
     
     # 为Linear Noise SDE添加梯度管理参数
@@ -51,16 +53,28 @@ def create_model(model_type, num_classes, args, dataset_config):
     if model_type == 'langevin':
         model = LangevinSDEContiformer(**model_configs)
         print("创建Langevin-type SDE + ContiFormer模型")
+        if args.use_sde == 0:
+            print("  - SDE组件: 已禁用")
+        if args.use_contiformer == 0:
+            print("  - ContiFormer组件: 已禁用")
         
     elif model_type == 'linear_noise':
         model = LinearNoiseSDEContiformer(**model_configs)
         print(f"创建Linear Noise SDE + ContiFormer模型")
+        if args.use_sde == 0:
+            print("  - SDE组件: 已禁用")
+        if args.use_contiformer == 0:
+            print("  - ContiFormer组件: 已禁用")
         print(f"  - 梯度断开: {dataset_config['enable_gradient_detach']}")
         print(f"  - 断开间隔: {args.detach_interval}")
         
     elif model_type == 'geometric':
         model = GeometricSDEContiformer(**model_configs)
         print("创建Geometric SDE + ContiFormer模型")
+        if args.use_sde == 0:
+            print("  - SDE组件: 已禁用")
+        if args.use_contiformer == 0:
+            print("  - ContiFormer组件: 已禁用")
         
     else:
         raise ValueError(f"未知模型类型: {model_type}")

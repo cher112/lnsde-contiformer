@@ -44,6 +44,8 @@ def get_dataset_specific_params(dataset_id, args):
         config['focal_gamma'] = args.focal_gamma
     if args.enable_gradient_detach:
         config['enable_gradient_detach'] = True
+    if args.min_time_interval is not None:
+        config['min_time_interval'] = args.min_time_interval
     
     print(f"温度参数: {config['temperature']}")
     print(f"Focal Gamma: {config['focal_gamma']}")
@@ -55,36 +57,102 @@ def get_dataset_specific_params(dataset_id, args):
 
 def setup_sde_config(sde_config_id, args):
     """设置SDE求解参数"""
-    sde_config_mapping = {
-        1: {  # 准确率优先 - 增加计算密度
-            'sde_method': 'milstein',
-            'dt': 0.005,  # 减小步长，增加积分步数
-            'rtol': 1e-6,
-            'atol': 1e-7,
-            'name': '准确率优先'
-        },
-        2: {  # 平衡
-            'sde_method': 'euler',
-            'dt': 0.025,  # 适度减小步长
-            'rtol': 1e-5,
-            'atol': 1e-6,
-            'name': '平衡'
-        },
-        3: {  # 时间优先
-            'sde_method': 'euler',
-            'dt': 0.1,
-            'rtol': 1e-4,
-            'atol': 1e-5,
-            'name': '时间优先'
-        },
-        4: {  # 极速配置 - 快速测试用
-            'sde_method': 'euler',
-            'dt': 0.2,  # 更大步长
-            'rtol': 1e-3,
-            'atol': 1e-4,
-            'name': '极速配置'
+    # 针对不同SDE类型调整参数
+    if args.model_type == 1:  # Langevin SDE
+        # Langevin SDE需要更大的步长和更宽松的容差来避免求解失败
+        sde_config_mapping = {
+            1: {  # 准确率优先 - 但对Langevin更宽松
+                'sde_method': 'euler',  # 使用更稳定的euler方法
+                'dt': 0.02,  # 增大步长避免积分失败
+                'rtol': 1e-4,  # 放宽容差
+                'atol': 1e-5,
+                'name': '准确率优先(Langevin优化)'
+            },
+            2: {  # 平衡
+                'sde_method': 'euler',
+                'dt': 0.05,
+                'rtol': 1e-3,
+                'atol': 1e-4,
+                'name': '平衡(Langevin优化)'
+            },
+            3: {  # 时间优先
+                'sde_method': 'euler',
+                'dt': 0.1,
+                'rtol': 1e-3,
+                'atol': 1e-4,
+                'name': '时间优先(Langevin优化)'
+            },
+            4: {  # 极速配置
+                'sde_method': 'euler',
+                'dt': 0.2,
+                'rtol': 1e-2,
+                'atol': 1e-3,
+                'name': '极速配置(Langevin优化)'
+            }
         }
-    }
+    elif args.model_type == 3:  # Geometric SDE
+        # Geometric SDE也需要优化参数避免数值不稳定
+        sde_config_mapping = {
+            1: {  # 准确率优先 - Geometric优化
+                'sde_method': 'euler',  # 使用euler方法
+                'dt': 0.01,  # 适中的步长
+                'rtol': 1e-5,  # 较宽松的容差
+                'atol': 1e-6,
+                'name': '准确率优先(Geometric优化)'
+            },
+            2: {  # 平衡
+                'sde_method': 'euler',
+                'dt': 0.03,
+                'rtol': 1e-4,
+                'atol': 1e-5,
+                'name': '平衡(Geometric优化)'
+            },
+            3: {  # 时间优先
+                'sde_method': 'euler',
+                'dt': 0.08,
+                'rtol': 1e-3,
+                'atol': 1e-4,
+                'name': '时间优先(Geometric优化)'
+            },
+            4: {  # 极速配置
+                'sde_method': 'euler',
+                'dt': 0.15,
+                'rtol': 1e-2,
+                'atol': 1e-3,
+                'name': '极速配置(Geometric优化)'
+            }
+        }
+    else:  # 其他SDE类型保持原有配置
+        sde_config_mapping = {
+            1: {  # 准确率优先 - 增加计算密度
+                'sde_method': 'milstein',
+                'dt': 0.005,  # 减小步长，增加积分步数
+                'rtol': 1e-6,
+                'atol': 1e-7,
+                'name': '准确率优先'
+            },
+            2: {  # 平衡
+                'sde_method': 'euler',
+                'dt': 0.025,  # 适度减小步长
+                'rtol': 1e-5,
+                'atol': 1e-6,
+                'name': '平衡'
+            },
+            3: {  # 时间优先
+                'sde_method': 'euler',
+                'dt': 0.1,
+                'rtol': 1e-4,
+                'atol': 1e-5,
+                'name': '时间优先'
+            },
+            4: {  # 极速配置 - 快速测试用
+                'sde_method': 'euler',
+                'dt': 0.2,  # 更大步长
+                'rtol': 1e-3,
+                'atol': 1e-4,
+                'name': '极速配置'
+            }
+        }
     
     config = sde_config_mapping[sde_config_id]
     
