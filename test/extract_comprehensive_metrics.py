@@ -25,7 +25,7 @@ def extract_all_best_metrics():
     all_results = defaultdict(lambda: defaultdict(list))
     
     # 查找所有日志文件
-    log_files = glob.glob("results/**/*.log", recursive=True)
+    log_files = glob.glob("/autodl-fs/data/lnsde-contiformer/results/**/*.log", recursive=True)
     
     print("=== 查找所有实验结果 ===")
     print("数据集: ASAS, LINEAR, MACHO") 

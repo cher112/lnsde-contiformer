@@ -24,7 +24,7 @@ def load_dataset_stats():
     datasets = {}
     
     for name in ['LINEAR', 'ASAS', 'MACHO']:
-        with open(f'/root/autodl-tmp/lnsde-contiformer/data/{name}_folded_512.pkl', 'rb') as f:
+        with open(f'/autodl-fs/data/lnsde-contiformer/{name}_folded_512.pkl', 'rb') as f:
             data = pickle.load(f)
         
         all_labels = [sample['label'] for sample in data]
@@ -294,7 +294,7 @@ More classes + More minority classes + Class imbalance
                        hspace=0.4, wspace=0.3)
     
     # 保存图片
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/pics/analysis"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/pics/analysis"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "imbalance_performance_analysis.png")
     

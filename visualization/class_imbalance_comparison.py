@@ -31,7 +31,7 @@ def load_dataset_stats():
     
     # ASAS数据集
     try:
-        with open('/root/autodl-tmp/code/data/ASAS_folded_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/ASAS_folded_512.pkl', 'rb') as f:
             data = pickle.load(f)
         all_labels = [sample['label'] for sample in data]
         unique_labels, counts = np.unique(all_labels, return_counts=True)
@@ -52,7 +52,7 @@ def load_dataset_stats():
     
     # LINEAR数据集  
     try:
-        with open('/root/autodl-tmp/code/data/LINEAR_folded_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/LINEAR_folded_512.pkl', 'rb') as f:
             data = pickle.load(f)
         all_labels = [sample['label'] for sample in data]
         unique_labels, counts = np.unique(all_labels, return_counts=True)
@@ -73,7 +73,7 @@ def load_dataset_stats():
     
     # MACHO数据集
     try:
-        with open('/root/autodl-tmp/code/data/MACHO_folded_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/MACHO_folded_512.pkl', 'rb') as f:
             data = pickle.load(f)
         all_labels = [sample['label'] for sample in data]
         unique_labels, counts = np.unique(all_labels, return_counts=True)
@@ -291,7 +291,7 @@ CV: {data['cv']:.3f}
                        hspace=0.4, wspace=0.3)
     
     # 保存图片
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/pics/comparison"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/pics/comparison"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "class_imbalance_comparison.png")
     

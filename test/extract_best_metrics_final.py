@@ -22,7 +22,7 @@ def extract_best_metrics():
     results = defaultdict(lambda: defaultdict(dict))
     
     # 查找所有日志文件
-    log_files = glob.glob("results/**/*.log", recursive=True)
+    log_files = glob.glob("/autodl-fs/data/lnsde-contiformer/results/**/*.log", recursive=True)
     
     print("=== 3个数据集2个方法的最优指标 ===")
     print("数据集: ASAS, LINEAR, MACHO")

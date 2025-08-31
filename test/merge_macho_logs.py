@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 def merge_macho_logs():
-    log_dir = "/root/autodl-tmp/lnsde+contiformer/results/logs/MACHO"
+    log_dir = "/autodl-fs/data/lnsde-contiformer/results/logs/MACHO"
     
     # 读取三个MACHO log文件
     log_files = [

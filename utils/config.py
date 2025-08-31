@@ -172,9 +172,9 @@ def setup_dataset_mapping(args):
     """设置数据集映射和模型类型映射"""
     # 数据集映射 - 现在主数据文件已修复
     dataset_mapping = {
-        1: ('data/ASAS_folded_512_fixed.pkl', 'ASAS'),    # 使用修复后的数据
-        2: ('data/LINEAR_folded_512_fixed.pkl', 'LINEAR'), # 使用修复后的数据
-        3: ('data/MACHO_folded_512_fixed.pkl', 'MACHO')   # 使用修复后的数据
+        1: ('/autodl-fs/data/lnsde-contiformer/data/ASAS_folded_512_fixed.pkl', 'ASAS'),    # 使用修复后的数据
+        2: ('/autodl-fs/data/lnsde-contiformer/data/LINEAR_folded_512_fixed.pkl', 'LINEAR'), # 使用修复后的数据
+        3: ('/autodl-fs/data/lnsde-contiformer/data/MACHO_folded_512_fixed.pkl', 'MACHO')   # 使用修复后的数据
     }
     
     # 模型类型映射

@@ -15,7 +15,7 @@ def load_fixed_data():
     datasets_info = {}
     
     # ASAS fixed - 实际数据
-    with open('/root/autodl-tmp/lnsde-contiformer/data/ASAS_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/ASAS_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)
@@ -26,7 +26,7 @@ def load_fixed_data():
     }
     
     # LINEAR fixed - 实际数据
-    with open('/root/autodl-tmp/lnsde-contiformer/data/LINEAR_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/LINEAR_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)
@@ -37,7 +37,7 @@ def load_fixed_data():
     }
     
     # MACHO fixed - 实际数据
-    with open('/root/autodl-tmp/lnsde-contiformer/data/MACHO_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/MACHO_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)

@@ -125,7 +125,7 @@ def extract_corrected_metrics(log_file: str) -> Dict:
 
 def analyze_dataset_corrected(dataset: str) -> Dict:
     """重新分析数据集指标"""
-    log_pattern = f"/root/autodl-tmp/lnsde-contiformer/results/**/{dataset}/**/logs/*.log"
+    log_pattern = f"/autodl-fs/data/lnsde-contiformer/results/**/{dataset}/**/logs/*.log"
     log_files = glob.glob(log_pattern, recursive=True)
     
     print(f"\n📊 重新分析 {dataset} 数据集")

@@ -21,7 +21,7 @@ def get_latest_metrics():
         "**/MACHO_geometric_sde_only*.log",
     ]
     
-    base_dir = "/root/autodl-tmp/lnsde-contiformer/results/20250830"
+    base_dir = "/autodl-fs/data/lnsde-contiformer/results/20250830"
     
     print("=" * 80)
     print("当前运行的6个任务最新指标")

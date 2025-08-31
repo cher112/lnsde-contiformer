@@ -28,8 +28,8 @@ def load_macho_data():
     """加载MACHO数据集"""
     # 查找MACHO原始数据文件（非fixed版本）
     data_paths = [
-        '/root/autodl-tmp/lnsde-contiformer/data/MACHO_folded_512.pkl',
-        '/root/autodl-tmp/code/data/MACHO_folded_512.pkl',
+        '/autodl-fs/data/lnsde-contiformer/MACHO_folded_512.pkl',
+        '/autodl-fs/data/lnsde-contiformer/MACHO_folded_512.pkl',
         '/root/autodl-tmp/PhysioPro/data/MACHO/folded_data.npz',
         '/root/autodl-tmp/PhysioPro/data/MACHO/backup_folded_data.npz'
     ]
@@ -291,7 +291,7 @@ Class Details:"""
                        hspace=0.35, wspace=0.25)  # 精细调整各边距和子图间距
     
     # 保存图片
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/pics/MACHO"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/pics/MACHO"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "macho_dataset_overview.png")
     

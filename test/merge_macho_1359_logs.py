@@ -9,7 +9,7 @@ from datetime import datetime
 
 def merge_macho_1359_logs():
     """合并MACHO 1359的训练日志文件"""
-    log_file = "/root/autodl-tmp/lnsde-contiformer/results/20250829/MACHO/1359/logs/MACHO_geometric_config1.log"
+    log_file = "/autodl-fs/data/lnsde-contiformer/results/20250829/MACHO/1359/logs/MACHO_geometric_config1.log"
     
     if not os.path.exists(log_file):
         print(f"未找到日志文件: {log_file}")
@@ -101,7 +101,7 @@ def merge_macho_1359_logs():
         merged_data["best_metrics"]["best_train_f1"] = max(train_f1_scores)
     
     # 保存合并后的数据
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/20250829/MACHO/1359/logs"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/20250829/MACHO/1359/logs"
     merged_file_path = os.path.join(output_dir, "MACHO_1359_geometric_config1_merged.log")
     
     with open(merged_file_path, 'w') as f:

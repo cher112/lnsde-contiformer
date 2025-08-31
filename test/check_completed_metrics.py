@@ -20,7 +20,7 @@ def get_completed_metrics():
         "MACHO ContiFormer": "**/MACHO_contiformer_only*.log",
     }
     
-    base_dir = "/root/autodl-tmp/lnsde-contiformer/results/20250830"
+    base_dir = "/autodl-fs/data/lnsde-contiformer/results/20250830"
     
     print("=" * 80)
     print("已完成的6个任务最终指标")

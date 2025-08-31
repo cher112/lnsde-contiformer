@@ -33,7 +33,7 @@ def load_fixed_data_and_calculate_mai():
     results = {}
     
     # ASAS
-    with open('/root/autodl-tmp/lnsde-contiformer/data/ASAS_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/ASAS_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)
@@ -59,7 +59,7 @@ def load_fixed_data_and_calculate_mai():
     }
     
     # LINEAR
-    with open('/root/autodl-tmp/lnsde-contiformer/data/LINEAR_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/LINEAR_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)
@@ -83,7 +83,7 @@ def load_fixed_data_and_calculate_mai():
     }
     
     # MACHO
-    with open('/root/autodl-tmp/lnsde-contiformer/data/MACHO_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/MACHO_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)
@@ -222,7 +222,7 @@ def create_visualization():
     plt.tight_layout()
     
     # 保存图片
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/pics/analysis"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/pics/analysis"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "accuracy_vs_mai_fixed.png")
     

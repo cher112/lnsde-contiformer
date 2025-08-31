@@ -31,7 +31,7 @@ def load_data():
     results = []
     
     # ASAS
-    with open('/root/autodl-tmp/lnsde-contiformer/data/ASAS_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/ASAS_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)
@@ -55,7 +55,7 @@ def load_data():
     })
     
     # LINEAR
-    with open('/root/autodl-tmp/lnsde-contiformer/data/LINEAR_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/LINEAR_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)
@@ -79,7 +79,7 @@ def load_data():
     })
     
     # MACHO
-    with open('/root/autodl-tmp/lnsde-contiformer/data/MACHO_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/MACHO_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     labels = [s['label'] for s in data]
     unique_labels, counts = np.unique(labels, return_counts=True)
@@ -197,7 +197,7 @@ def create_double_bar_plot():
     plt.tight_layout()
     
     # 保存图片
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/pics/analysis"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/pics/analysis"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "accuracy_mai_seaborn.png")
     
@@ -255,7 +255,7 @@ def create_correlation_plot(df):
     plt.tight_layout()
     
     # 保存
-    output_path = "/root/autodl-tmp/lnsde-contiformer/results/pics/analysis/mai_correlation.png"
+    output_path = "/autodl-fs/data/lnsde-contiformer/results/pics/analysis/mai_correlation.png"
     plt.savefig(output_path, bbox_inches='tight', facecolor='white')
     print(f"✅ Correlation plot saved: {output_path}")
     

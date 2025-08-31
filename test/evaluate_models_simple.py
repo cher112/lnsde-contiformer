@@ -210,15 +210,15 @@ def main():
     
     # 0828年训练的最佳模型
     models_0828 = [
-        '/root/autodl-tmp/lnsde-contiformer/results/20250828/ASAS/2116/models/ASAS_linear_noise_best.pth',
-        '/root/autodl-tmp/lnsde-contiformer/results/20250828/LINEAR/2116/models/LINEAR_linear_noise_best.pth',
-        '/root/autodl-tmp/lnsde-contiformer/results/20250828/MACHO/2116/models/MACHO_linear_noise_best.pth'
+        '/autodl-fs/data/lnsde-contiformer/results/20250828/ASAS/2116/models/ASAS_linear_noise_best.pth',
+        '/autodl-fs/data/lnsde-contiformer/results/20250828/LINEAR/2116/models/LINEAR_linear_noise_best.pth',
+        '/autodl-fs/data/lnsde-contiformer/results/20250828/MACHO/2116/models/MACHO_linear_noise_best.pth'
     ]
     
     # 0829年MACHO训练的最佳模型
     models_0829 = [
-        '/root/autodl-tmp/lnsde-contiformer/results/20250829/MACHO/1359/models/MACHO_geometric_best.pth',
-        '/root/autodl-tmp/lnsde-contiformer/results/20250829/MACHO/1756/models/MACHO_langevin_best.pth'
+        '/autodl-fs/data/lnsde-contiformer/results/20250829/MACHO/1359/models/MACHO_geometric_best.pth',
+        '/autodl-fs/data/lnsde-contiformer/results/20250829/MACHO/1756/models/MACHO_langevin_best.pth'
     ]
     
     results = []

@@ -143,7 +143,7 @@ def main():
     print("=== 更新所有日志文件中的F1和Recall为加权平均 ===")
     
     # 查找所有日志文件
-    log_files = glob.glob("results/**/*.log", recursive=True)
+    log_files = glob.glob("/autodl-fs/data/lnsde-contiformer/results/**/*.log", recursive=True)
     log_files = [f for f in log_files if os.path.isfile(f)]
     
     print(f"找到 {len(log_files)} 个日志文件")

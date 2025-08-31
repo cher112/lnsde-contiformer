@@ -28,8 +28,8 @@ def load_asas_data():
     """加载ASAS数据集"""
     # 查找ASAS原始数据文件（非fixed版本）
     data_paths = [
-        '/root/autodl-tmp/lnsde-contiformer/data/ASAS_folded_512.pkl',
-        '/root/autodl-tmp/code/data/ASAS_folded_512.pkl',
+        '/autodl-fs/data/lnsde-contiformer/ASAS_folded_512.pkl',
+        '/autodl-fs/data/lnsde-contiformer/ASAS_folded_512.pkl',
         '/root/autodl-tmp/PhysioPro/data/ASAS/folded_data.npz',
         '/root/autodl-tmp/PhysioPro/data/ASAS/backup_folded_data.npz'
     ]
@@ -283,7 +283,7 @@ Class Details:"""
                        hspace=0.35, wspace=0.25)  # 精细调整各边距和子图间距
     
     # 保存图片
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/pics/ASAS"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/pics/ASAS"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "asas_dataset_overview.png")
     

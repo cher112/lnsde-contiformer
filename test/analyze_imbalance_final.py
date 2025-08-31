@@ -16,7 +16,7 @@ def load_dataset_info():
     
     # ASAS
     try:
-        with open('/root/autodl-tmp/code/data/ASAS_folded_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/ASAS_folded_512.pkl', 'rb') as f:
             data = pickle.load(f)
         all_labels = [sample['label'] for sample in data]
         unique_labels, counts = np.unique(all_labels, return_counts=True)
@@ -29,7 +29,7 @@ def load_dataset_info():
     
     # LINEAR
     try:
-        with open('/root/autodl-tmp/code/data/LINEAR_folded_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/LINEAR_folded_512.pkl', 'rb') as f:
             data = pickle.load(f)
         all_labels = [sample['label'] for sample in data]
         unique_labels, counts = np.unique(all_labels, return_counts=True)
@@ -42,7 +42,7 @@ def load_dataset_info():
     
     # MACHO
     try:
-        with open('/root/autodl-tmp/code/data/MACHO_folded_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/MACHO_folded_512.pkl', 'rb') as f:
             data = pickle.load(f)
         all_labels = [sample['label'] for sample in data]
         unique_labels, counts = np.unique(all_labels, return_counts=True)

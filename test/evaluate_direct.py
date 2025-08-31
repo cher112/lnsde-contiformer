@@ -165,11 +165,11 @@ def main():
     
     # 模型路径
     models = [
-        ('/root/autodl-tmp/lnsde-contiformer/results/20250828/ASAS/2116/models/ASAS_linear_noise_best.pth', 'ASAS_linear_noise_0828'),
-        ('/root/autodl-tmp/lnsde-contiformer/results/20250828/LINEAR/2116/models/LINEAR_linear_noise_best.pth', 'LINEAR_linear_noise_0828'),
-        ('/root/autodl-tmp/lnsde-contiformer/results/20250828/MACHO/2116/models/MACHO_linear_noise_best.pth', 'MACHO_linear_noise_0828'),
-        ('/root/autodl-tmp/lnsde-contiformer/results/20250829/MACHO/1359/models/MACHO_geometric_best.pth', 'MACHO_geometric_0829'),
-        ('/root/autodl-tmp/lnsde-contiformer/results/20250829/MACHO/1756/models/MACHO_langevin_best.pth', 'MACHO_langevin_0829')
+        ('/autodl-fs/data/lnsde-contiformer/results/20250828/ASAS/2116/models/ASAS_linear_noise_best.pth', 'ASAS_linear_noise_0828'),
+        ('/autodl-fs/data/lnsde-contiformer/results/20250828/LINEAR/2116/models/LINEAR_linear_noise_best.pth', 'LINEAR_linear_noise_0828'),
+        ('/autodl-fs/data/lnsde-contiformer/results/20250828/MACHO/2116/models/MACHO_linear_noise_best.pth', 'MACHO_linear_noise_0828'),
+        ('/autodl-fs/data/lnsde-contiformer/results/20250829/MACHO/1359/models/MACHO_geometric_best.pth', 'MACHO_geometric_0829'),
+        ('/autodl-fs/data/lnsde-contiformer/results/20250829/MACHO/1756/models/MACHO_langevin_best.pth', 'MACHO_langevin_0829')
     ]
     
     results = []

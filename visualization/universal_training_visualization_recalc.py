@@ -112,7 +112,7 @@ def load_training_data(dataset_name):
     
     if dataset_name == "ASAS":
         # ASAS需要合并两个文件
-        log_dir = "/root/autodl-tmp/lnsde-contiformer/results/20250828/ASAS/2116/logs/"
+        log_dir = "/autodl-fs/data/lnsde-contiformer/results/20250828/ASAS/2116/logs/"
         
         # 加载epoch 1-75的数据
         with open(os.path.join(log_dir, "ASAS_linear_noise_config1_20250828_194131.log"), 'r') as f:
@@ -159,13 +159,13 @@ def load_training_data(dataset_name):
         return all_epochs
     
     elif dataset_name == "LINEAR":
-        log_path = "/root/autodl-tmp/lnsde-contiformer/results/20250828/LINEAR/2116/logs/LINEAR_linear_noise_config1_20250828_194129.log"
+        log_path = "/autodl-fs/data/lnsde-contiformer/results/20250828/LINEAR/2116/logs/LINEAR_linear_noise_config1_20250828_194129.log"
         with open(log_path, 'r') as f:
             data = json.load(f)
         return [recalculate_epoch_metrics(epoch) for epoch in data['epochs']]
     
     elif dataset_name == "MACHO":
-        log_path = "/root/autodl-tmp/lnsde-contiformer/results/20250828/MACHO/2116/logs/MACHO_linear_noise_config1_20250828_194135.log"
+        log_path = "/autodl-fs/data/lnsde-contiformer/results/20250828/MACHO/2116/logs/MACHO_linear_noise_config1_20250828_194135.log"
         with open(log_path, 'r') as f:
             data = json.load(f)
         return [recalculate_epoch_metrics(epoch) for epoch in data['epochs']]
@@ -405,7 +405,7 @@ def main():
             print(f"成功加载并处理 {len(epochs)} 个epoch的数据")
             
             # 创建输出目录
-            output_dir = f"/root/autodl-tmp/lnsde-contiformer/results/pics/{dataset_name}/"
+            output_dir = f"/autodl-fs/data/lnsde-contiformer/results/pics/{dataset_name}/"
             os.makedirs(output_dir, exist_ok=True)
             
             # 生成可视化图像

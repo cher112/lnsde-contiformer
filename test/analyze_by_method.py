@@ -110,7 +110,7 @@ def extract_metrics_by_method(log_file: str) -> Dict:
 
 def analyze_dataset_by_method(dataset: str) -> Dict:
     """按方法分析数据集"""
-    log_pattern = f"/root/autodl-tmp/lnsde-contiformer/results/**/{dataset}/**/logs/*.log"
+    log_pattern = f"/autodl-fs/data/lnsde-contiformer/results/**/{dataset}/**/logs/*.log"
     log_files = glob.glob(log_pattern, recursive=True)
     
     print(f"\n📊 分析 {dataset} 数据集")

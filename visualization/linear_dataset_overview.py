@@ -28,8 +28,8 @@ def load_linear_data():
     """加载LINEAR数据集"""
     # 查找LINEAR原始数据文件（非fixed版本）
     data_paths = [
-        '/root/autodl-tmp/lnsde-contiformer/data/LINEAR_folded_512.pkl',
-        '/root/autodl-tmp/code/data/LINEAR_folded_512.pkl',
+        '/autodl-fs/data/lnsde-contiformer/LINEAR_folded_512.pkl',
+        '/autodl-fs/data/lnsde-contiformer/LINEAR_folded_512.pkl',
         '/root/autodl-tmp/PhysioPro/data/LINEAR/folded_data.npz',
         '/root/autodl-tmp/PhysioPro/data/LINEAR/backup_folded_data.npz'
     ]
@@ -287,7 +287,7 @@ Class Details:"""
                        hspace=0.35, wspace=0.25)  # 精细调整各边距和子图间距
     
     # 保存图片
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/pics/LINEAR"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/pics/LINEAR"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "linear_dataset_overview.png")
     

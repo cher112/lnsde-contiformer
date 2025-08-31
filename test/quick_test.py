@@ -32,7 +32,7 @@ def quick_test():
     print(f"标签分布: {np.bincount(labels)}")
     
     # 加载模型
-    model_path = '/root/autodl-tmp/lnsde-contiformer/results/20250828/ASAS/2116/models/ASAS_linear_noise_best.pth'
+    model_path = '/autodl-fs/data/lnsde-contiformer/results/20250828/ASAS/2116/models/ASAS_linear_noise_best.pth'
     checkpoint = torch.load(model_path, map_location='cpu')
     state_dict = checkpoint['model_state_dict']
     

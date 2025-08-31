@@ -96,7 +96,7 @@ def extract_metrics_from_log(log_file: str) -> List[Dict]:
 
 def find_best_metrics_for_dataset(dataset: str) -> Dict:
     """查找指定数据集的最佳指标"""
-    log_pattern = f"/root/autodl-tmp/lnsde-contiformer/results/**/{dataset}/**/logs/*.log"
+    log_pattern = f"/autodl-fs/data/lnsde-contiformer/results/**/{dataset}/**/logs/*.log"
     log_files = glob.glob(log_pattern, recursive=True)
     
     all_metrics = []

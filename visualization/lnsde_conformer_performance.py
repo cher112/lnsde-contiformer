@@ -207,7 +207,7 @@ def create_performance_comparison():
     plt.tight_layout()
     
     # 确保输出目录存在
-    output_dir = '/root/autodl-tmp/lnsde-contiformer/results/pics'
+    output_dir = '/autodl-fs/data/lnsde-contiformer/results/pics'
     os.makedirs(output_dir, exist_ok=True)
     
     # 保存图片

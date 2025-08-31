@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-import sys
-sys.path.append('/root/autodl-tmp/PhysioPro')
 
 try:
     from physiopro.network.contiformer import ContiFormer as OriginalContiFormer

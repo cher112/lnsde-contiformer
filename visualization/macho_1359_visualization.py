@@ -96,7 +96,7 @@ def calculate_metrics_from_confusion_matrix(cm):
 
 def load_macho_1359_data():
     """加载MACHO 1359合并的训练数据"""
-    log_file = "/root/autodl-tmp/lnsde-contiformer/results/20250829/MACHO/1359/logs/MACHO_1359_geometric_config1_merged.log"
+    log_file = "/autodl-fs/data/lnsde-contiformer/results/20250829/MACHO/1359/logs/MACHO_1359_geometric_config1_merged.log"
     
     with open(log_file, 'r') as f:
         data = json.load(f)
@@ -282,7 +282,7 @@ def main():
     print(f"成功加载数据，包含epochs: {min(data['epochs'])} - {max(data['epochs'])}")
     
     # 创建输出目录
-    output_dir = "/root/autodl-tmp/lnsde-contiformer/results/pics/MACHO/"
+    output_dir = "/autodl-fs/data/lnsde-contiformer/results/pics/MACHO/"
     os.makedirs(output_dir, exist_ok=True)
     
     # 生成可视化

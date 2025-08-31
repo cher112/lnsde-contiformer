@@ -17,7 +17,7 @@ def load_and_analyze_fixed_data():
     
     # ASAS fixed
     print("\n加载ASAS fixed数据...")
-    with open('/root/autodl-tmp/lnsde-contiformer/data/ASAS_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/ASAS_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     
     # 分析padding情况
@@ -50,7 +50,7 @@ def load_and_analyze_fixed_data():
     
     # LINEAR fixed
     print("\n加载LINEAR fixed数据...")
-    with open('/root/autodl-tmp/lnsde-contiformer/data/LINEAR_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/LINEAR_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     
     total_samples = len(data)
@@ -81,7 +81,7 @@ def load_and_analyze_fixed_data():
     
     # MACHO fixed
     print("\n加载MACHO fixed数据...")
-    with open('/root/autodl-tmp/lnsde-contiformer/data/MACHO_folded_512_fixed.pkl', 'rb') as f:
+    with open('/autodl-fs/data/lnsde-contiformer/MACHO_folded_512_fixed.pkl', 'rb') as f:
         data = pickle.load(f)
     
     total_samples = len(data)

@@ -8,13 +8,13 @@ usage_info = """
 🚀 训练命令示例:
 
 1. 训练 Langevin SDE 模型:
-   python main.py --model_type langevin --data_path data/ASAS_folded_512.pkl --dataset_name ASAS --epochs 50
+   python main.py --model_type langevin --data_path /autodl-fs/data/lnsde-contiformer/ASAS_folded_512.pkl --dataset_name ASAS --epochs 50
 
 2. 训练 Linear Noise SDE 模型:  
-   python main.py --model_type linear_noise --data_path data/LINEAR_folded_512.pkl --dataset_name LINEAR --epochs 50
+   python main.py --model_type linear_noise --data_path /autodl-fs/data/lnsde-contiformer/LINEAR_folded_512.pkl --dataset_name LINEAR --epochs 50
 
 3. 训练 Geometric SDE 模型:
-   python main.py --model_type geometric --data_path data/MACHO_folded_512.pkl --dataset_name MACHO --epochs 50
+   python main.py --model_type geometric --data_path /autodl-fs/data/lnsde-contiformer/MACHO_folded_512.pkl --dataset_name MACHO --epochs 50
 
 📋 重要参数说明:
    --model_type {langevin|linear_noise|geometric}  # 模型类型选择

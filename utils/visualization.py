@@ -387,7 +387,7 @@ def generate_training_visualizations(log_file, dataset_name, model_type_str, tim
         output_dir = os.path.join(timestamp_dir, "plots")
     else:
         # 后备方案：使用基础results目录
-        output_dir = f'/root/autodl-tmp/lnsde-contiformer/results/plots'
+        output_dir = f'/autodl-fs/data/lnsde-contiformer/results/plots'
     
     os.makedirs(output_dir, exist_ok=True)
     

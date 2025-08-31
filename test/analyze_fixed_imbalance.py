@@ -17,7 +17,7 @@ def load_fixed_dataset_info():
     
     # ASAS fixed
     try:
-        with open('/root/autodl-tmp/code/data/ASAS_fixed_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/ASAS_fixed_512.pkl', 'rb') as f:
             data = pickle.load(f)
         # 删除padding的样本
         valid_data = [sample for sample in data if not all(sample['light_curves'][:, 0] == 0)]
@@ -40,7 +40,7 @@ def load_fixed_dataset_info():
     
     # LINEAR fixed
     try:
-        with open('/root/autodl-tmp/code/data/LINEAR_fixed_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/LINEAR_fixed_512.pkl', 'rb') as f:
             data = pickle.load(f)
         # 删除padding的样本
         valid_data = [sample for sample in data if not all(sample['light_curves'][:, 0] == 0)]
@@ -62,7 +62,7 @@ def load_fixed_dataset_info():
     
     # MACHO fixed
     try:
-        with open('/root/autodl-tmp/code/data/MACHO_fixed_512.pkl', 'rb') as f:
+        with open('/autodl-fs/data/lnsde-contiformer/MACHO_fixed_512.pkl', 'rb') as f:
             data = pickle.load(f)
         # 删除padding的样本
         valid_data = [sample for sample in data if not all(sample['light_curves'][:, 0] == 0)]

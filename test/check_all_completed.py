@@ -8,7 +8,7 @@ from glob import glob
 def get_all_completed_metrics():
     """获取所有已完成任务的完整指标"""
     
-    base_dir = "/root/autodl-tmp/lnsde-contiformer/results/20250830"
+    base_dir = "/autodl-fs/data/lnsde-contiformer/results/20250830"
     
     # 查找所有相关日志文件
     patterns = [
