@@ -124,6 +124,25 @@ configure_chinese_font()
 - 支持模型版本回滚和管理
 - 促进团队协作和知识共享
 
+## 网络加速配置
+
+### Git 和远程服务器操作加速
+**每次使用 git 推送或远程服务器功能时，需要先启用网络加速**：
+
+```bash
+source /etc/network_turbo
+```
+
+### 使用规则：
+- 每个session只需执行一次
+- 在进行 git push、git pull、远程下载等网络操作前执行
+- 适用于所有需要网络连接的远程操作
+
+### 目的：
+- 提高网络连接稳定性和速度
+- 确保大型文件传输的可靠性
+- 减少网络超时和连接失败
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
