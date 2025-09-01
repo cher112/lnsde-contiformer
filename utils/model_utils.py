@@ -129,14 +129,19 @@ def load_model_checkpoint(model, optimizer, args, load_type):
     
     if load_type == 1:  # 加载最新
         # 在results目录下递归搜索epoch模型
-        for root, dirs, files in os.walk("./results"):
+        for root, _, files in os.walk("./results"):
             for file in files:
-                if (file.startswith(f"{args.dataset_name}_{args.model_type}_epoch_") and 
-                    file.endswith('.pth')):
+                if (file.startswith(f"{args.dataset_name}_{args.model_type}") and 
+                    "_epoch" in file and file.endswith('.pth') and "best" not in file):
                     full_path = os.path.join(root, file)
                     # 提取epoch号
                     try:
-                        epoch_num = int(file.split('_epoch_')[1].split('.')[0])
+                        if "_epoch_" in file:
+                            epoch_num = int(file.split('_epoch_')[1].split('.')[0])
+                        else:
+                            # 新格式: epochN.pth
+                            epoch_part = file.split('_epoch')[1].split('.')[0]
+                            epoch_num = int(epoch_part)
                         potential_paths.append((epoch_num, full_path))
                     except:
                         continue
@@ -153,7 +158,7 @@ def load_model_checkpoint(model, optimizer, args, load_type):
         
     elif load_type == 2:  # 加载最好
         # 递归搜索best模型
-        for root, dirs, files in os.walk("./results"):
+        for root, _, files in os.walk("./results"):
             for file in files:
                 if file == f"{args.dataset_name}_{args.model_type}_best.pth":
                     full_path = os.path.join(root, file)
@@ -196,9 +201,42 @@ def load_model_checkpoint(model, optimizer, args, load_type):
                 print("模型参数不匹配，从头开始训练")
                 return 0.0, 0
         
-        # 加载模型状态
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"✓ 模型状态已加载")
+        # 加载模型状态 - 处理架构不匹配的情况
+        try:
+            model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+            print(f"✓ 模型状态已完整加载")
+        except RuntimeError as e:
+            if "Missing key(s)" in str(e) or "Unexpected key(s)" in str(e):
+                print(f"⚠️ 模型架构不匹配，尝试部分加载...")
+                print(f"错误详情: {e}")
+                
+                # 尝试部分加载
+                try:
+                    missing_keys, unexpected_keys = model.load_state_dict(
+                        checkpoint['model_state_dict'], strict=False
+                    )
+                    
+                    if missing_keys:
+                        print(f"⚠️ 缺失的参数将使用随机初始化: {len(missing_keys)} 个参数")
+                        for key in missing_keys[:5]:  # 只显示前5个
+                            print(f"  - {key}")
+                        if len(missing_keys) > 5:
+                            print(f"  - ... 还有 {len(missing_keys) - 5} 个参数")
+                    
+                    if unexpected_keys:
+                        print(f"⚠️ 忽略的参数: {len(unexpected_keys)} 个")
+                        for key in unexpected_keys[:5]:  # 只显示前5个
+                            print(f"  - {key}")
+                        if len(unexpected_keys) > 5:
+                            print(f"  - ... 还有 {len(unexpected_keys) - 5} 个参数")
+                    
+                    print(f"✓ 模型状态已部分加载（架构兼容模式）")
+                except Exception as e2:
+                    print(f"❌ 部分加载也失败: {e2}")
+                    print("从头开始训练")
+                    return 0.0, 0
+            else:
+                raise e
         
         # 尝试加载优化器状态（仅对继续训练有效）
         if load_type == 1 and 'optimizer_state_dict' in checkpoint:
@@ -213,7 +251,7 @@ def load_model_checkpoint(model, optimizer, args, load_type):
         loaded_epoch = checkpoint.get('epoch', 0)
         start_epoch = loaded_epoch + 1 if load_type == 1 else 0
         
-        print(f"✓ 加载完成 - 已完成轮次: {loaded_epoch + 1}, 最佳验证精度: {best_val_acc:.4f}, 继续从轮次: {start_epoch + 1}")
+        print(f"✓ 加载完成 - 已完成epoch: {loaded_epoch}, 最佳验证精度: {best_val_acc:.4f}, 继续从epoch: {start_epoch}")
         return best_val_acc, start_epoch
         
     except Exception as e:

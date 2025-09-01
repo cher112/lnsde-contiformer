@@ -43,7 +43,7 @@ class TrainingManager:
         print("=== 开始训练 ===")
         
         if start_epoch > 0:
-            print(f"从第 {start_epoch + 1} 轮继续训练...")
+            print(f"从第 {start_epoch} 轮继续训练...")
         else:
             print("从头开始训练...")
         
@@ -258,9 +258,9 @@ class TrainingManager:
                    xticklabels=class_names, yticklabels=class_names)
         plt.title(f"{self.args.dataset_name} - 混淆矩阵\n"
                  f"模型: {self.args.model_type} | "
-                 f"SDE: {\"On\" if self.args.use_sde else \"Off\"} | "
-                 f"ContiFormer: {\"On\" if self.args.use_contiformer else \"Off\"} | "
-                 f"CGA: {\"On\" if self.args.use_cga else \"Off\"}")
+                 f"SDE: {'On' if self.args.use_sde else 'Off'} | "
+                 f"ContiFormer: {'On' if self.args.use_contiformer else 'Off'} | "
+                 f"CGA: {'On' if self.args.use_cga else 'Off'}")
         plt.xlabel("预测类别")
         plt.ylabel("真实类别")
         
@@ -292,9 +292,9 @@ class TrainingManager:
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(f"{self.args.dataset_name} 分类报告\n")
             f.write(f"模型: {self.args.model_type}\n")
-            f.write(f"SDE: {\"On\" if self.args.use_sde else \"Off\"}\n")
-            f.write(f"ContiFormer: {\"On\" if self.args.use_contiformer else \"Off\"}\n")
-            f.write(f"CGA: {\"On\" if self.args.use_cga else \"Off\"}\n\n")
+            f.write(f"SDE: {'On' if self.args.use_sde else 'Off'}\n")
+            f.write(f"ContiFormer: {'On' if self.args.use_contiformer else 'Off'}\n")
+            f.write(f"CGA: {'On' if self.args.use_cga else 'Off'}\n\n")
             f.write(classification_report(y_true, y_pred, target_names=class_names))
         
         print(f"✅ 分类报告已保存: {report_path}")
@@ -302,8 +302,8 @@ class TrainingManager:
         # 计算总体指标
         accuracy = (y_true == y_pred).mean()
         print(f"总体准确率: {accuracy:.4f}")
-        print(f"加权F1分数: {report[\"weighted avg\"][\"f1-score\"]:.4f}")
-        print(f"宏平均F1分数: {report[\"macro avg\"][\"f1-score\"]:.4f}")
+        print(f"加权F1分数: {report['weighted avg']['f1-score']:.4f}")
+        print(f"宏平均F1分数: {report['macro avg']['f1-score']:.4f}")
     
     def _get_class_names(self):
         """获取类别名称"""
@@ -312,7 +312,7 @@ class TrainingManager:
         elif self.args.dataset_name == "LINEAR":
             return ["Beta_Persei", "Delta_Scuti", "RR_Lyrae_FM", "RR_Lyrae_FO", "W_Ursae_Maj"]
         elif self.args.dataset_name == "MACHO":
-            return ["Beta_Persei", "Delta_Scuti", "RR_Lyrae_FM", "RR_Lyrae_FO", "W_Ursae_Maj"]
+            return ["RR_Lyrae_ab", "RR_Lyrae_c", "Cepheid", "EB", "Long_Period_Variable", "Non_Variable", "Quasar"]
         else:
             # 默认类别名称
             return [f"Class_{i}" for i in range(self.model.num_classes)]

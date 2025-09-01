@@ -41,12 +41,12 @@ def parse_args():
                        help='SDE模型类型 (1:langevin, 2:linear_noise, 3:geometric)')
     
     # 模型加载选项
-    parser.add_argument('--load_model', type=int, default=2,
+    parser.add_argument('--load_model', type=int, default=1,
                        choices=[0, 1, 2],
                        help='模型加载选项 (0:不加载, 1:加载最新, 2:加载最优)')
     
     # 数据相关 - 使用数字代表数据集
-    parser.add_argument('--dataset', type=int, default=2,
+    parser.add_argument('--dataset', type=int, default=3,
                        choices=[1, 2, 3],
                        help='数据集选择: 1=ASAS, 2=LINEAR, 3=MACHO')
     
@@ -59,8 +59,8 @@ def parse_args():
                        help='实时生成重采样数据（而非加载预生成的）')
     
     # 训练参数 - 准确率优先设置
-    parser.add_argument('--batch_size', type=int, default=64, help='批大小（优化GPU利用率）')
-    parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
+    parser.add_argument('--batch_size', type=int, default=80, help='批大小（优化GPU利用率）')
+    parser.add_argument('--epochs', type=int, default=300, help='训练轮数')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='学习率')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='权重衰减')
     
@@ -177,17 +177,30 @@ def main():
             all_labels = []
             all_times = []
             all_masks = []
+            all_periods = []
             
             for batch in train_loader:
-                all_features.append(batch['features'])
+                # 处理不同的数据格式
+                if 'features' in batch:
+                    all_features.append(batch['features'])
+                    all_times.append(batch['features'][:, :, 0])  # 提取时间维度
+                elif 'x' in batch:
+                    x = batch['x']  # (batch, seq_len, 2) [time, mag]
+                    batch_size, seq_len = x.shape[0], x.shape[1]
+                    errmag = torch.zeros(batch_size, seq_len, 1)
+                    features = torch.cat([x, errmag], dim=2)  # (batch, seq_len, 3)
+                    all_features.append(features)
+                    all_times.append(x[:, :, 0])  # 提取时间维度
+                
                 all_labels.append(batch['labels'])
-                all_times.append(batch['times'])
-                all_masks.append(batch['masks'])
+                all_masks.append(batch.get('mask', torch.ones_like(batch.get('features', batch.get('x'))[:, :, 0], dtype=torch.bool)))
+                all_periods.append(batch.get('periods', torch.zeros(batch['labels'].shape[0])))
             
             X = torch.cat(all_features, dim=0)
             y = torch.cat(all_labels, dim=0)
             times = torch.cat(all_times, dim=0)
             masks = torch.cat(all_masks, dim=0)
+            periods = torch.cat(all_periods, dim=0)
             
             # 执行重采样
             resampler = HybridResampler(
@@ -204,12 +217,40 @@ def main():
             
             # 创建重采样后的数据加载器
             from torch.utils.data import TensorDataset, DataLoader
-            resampled_dataset = TensorDataset(X_resampled, y_resampled, times_resampled, masks_resampled)
+            
+            class ResampledTensorDataset(TensorDataset):
+                def __init__(self, X, y, times, masks, periods=None):
+                    self.X = X
+                    self.y = y
+                    self.times = times
+                    self.masks = masks
+                    self.periods = periods if periods is not None else torch.zeros(len(y))
+                
+                def __len__(self):
+                    return len(self.y)
+                
+                def __getitem__(self, idx):
+                    return {
+                        'features': self.X[idx],
+                        'labels': self.y[idx],
+                        'times': self.times[idx],
+                        'mask': self.masks[idx],
+                        'periods': self.periods[idx]
+                    }
+            
+            resampled_dataset = ResampledTensorDataset(X_resampled, y_resampled, times_resampled, masks_resampled)
             train_loader = DataLoader(
                 resampled_dataset,
                 batch_size=args.batch_size,
                 shuffle=True,
-                num_workers=args.num_workers
+                num_workers=args.num_workers,
+                collate_fn=lambda batch: {
+                    'features': torch.stack([item['features'] for item in batch]),
+                    'labels': torch.stack([item['labels'] for item in batch]),
+                    'times': torch.stack([item['times'] for item in batch]),
+                    'mask': torch.stack([item['mask'] for item in batch]),
+                    'periods': torch.stack([item['periods'] for item in batch])
+                }
             )
             
             # 可视化重采样效果
@@ -247,6 +288,9 @@ def main():
                     self.y = y
                     self.times = times
                     self.masks = masks
+                    
+                    # 为重采样数据生成periods（假设所有样本的period为0，因为重采样数据可能没有真实period信息）
+                    self.periods = torch.zeros(len(y))
                 
                 def __len__(self):
                     return len(self.y)
@@ -256,7 +300,8 @@ def main():
                         'features': self.X[idx],
                         'labels': self.y[idx],
                         'times': self.times[idx],
-                        'mask': self.masks[idx]
+                        'mask': self.masks[idx],
+                        'periods': self.periods[idx]
                     }
             
             X = torch.tensor(resampled_data['X']) if not torch.is_tensor(resampled_data['X']) else resampled_data['X']
@@ -297,7 +342,8 @@ def main():
                     'features': torch.stack([item['features'] for item in batch]),
                     'labels': torch.stack([item['labels'] for item in batch]),
                     'times': torch.stack([item['times'] for item in batch]),
-                    'mask': torch.stack([item['mask'] for item in batch])
+                    'mask': torch.stack([item['mask'] for item in batch]),
+                    'periods': torch.stack([item['periods'] for item in batch])
                 }
             )
             
@@ -310,7 +356,8 @@ def main():
                     'features': torch.stack([item['features'] for item in batch]),
                     'labels': torch.stack([item['labels'] for item in batch]),
                     'times': torch.stack([item['times'] for item in batch]),
-                    'mask': torch.stack([item['mask'] for item in batch])
+                    'mask': torch.stack([item['mask'] for item in batch]),
+                    'periods': torch.stack([item['periods'] for item in batch])
                 }
             )
             

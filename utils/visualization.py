@@ -407,7 +407,9 @@ def generate_training_visualizations(log_file, dataset_name, model_type_str, tim
         return []
     
     # 创建综合的训练过程四子图 (主要图表)
-    comprehensive_filename = f'{dataset_name.lower()}_{model_type_str}_complete_training_{len(epochs)}epochs_original.png'
+    # 清理model_type_str，去除不必要的字符，使文件名更简洁
+    clean_model_type = model_type_str.replace('_', '').replace('+', '').replace('unknown', 'sde')
+    comprehensive_filename = f'{dataset_name.lower()}_{clean_model_type}_training_{len(epochs)}epochs.png'
     comprehensive_save_path = os.path.join(output_dir, comprehensive_filename)
     
     try:

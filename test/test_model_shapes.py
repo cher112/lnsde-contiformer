@@ -5,8 +5,8 @@
 import torch
 import numpy as np
 import sys
-sys.path.append('..')
-sys.path.append('/root/autodl-tmp/lnsde+contiformer')
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import LangevinSDEContiformer, LinearNoiseSDEContiformer, GeometricSDEContiformer
 
