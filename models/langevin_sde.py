@@ -1,6 +1,7 @@
 """
-Langevin-type SDE Model
-朗之万型随机微分方程：dY_t = -∇U(Y_t)dt + g(t,Y_t)dW_t
+Langevin SDE Model
+朗之万随机微分方程：dX_t = -∇U(X_t)dt + σdW_t
+其中U(X_t)是势能函数，σ是扩散系数
 """
 
 import torch
@@ -12,34 +13,39 @@ import torchsde
 
 from .base_sde import BaseSDEModel, MaskedSequenceProcessor
 from .contiformer import ContiFormerModule
+from .cga_module import CGAClassifier
 
 
 class LangevinSDE(BaseSDEModel):
     """
-    朗之万型SDE实现
-    dY_t = -∇U(Y_t)dt + σ(t,Y_t)dW_t
-    其中U(Y_t)是势能函数
+    Langevin SDE实现
+    dX_t = -∇U(X_t)dt + σdW_t
+    其中势能函数U(X_t)通过神经网络建模
     """
     def __init__(self, input_channels, hidden_channels, output_channels):
         super().__init__(input_channels, hidden_channels, output_channels, sde_type='ito')
         self.noise_type = 'diagonal'
         
-        # 势能函数网络 U(y)
+        # 势能函数网络 U(x,t)
         self.potential_net = nn.Sequential(
-            nn.Linear(hidden_channels, hidden_channels * 2),
+            nn.Linear(hidden_channels + 1, hidden_channels * 2),  # +1 for time
             nn.Tanh(),
             nn.Linear(hidden_channels * 2, hidden_channels),
             nn.Tanh(),
             nn.Linear(hidden_channels, 1)  # 输出标量势能
         )
         
-        # 扩散系数网络 σ(t,y)
+        # 时间相关的扩散系数 σ(t)
         self.diffusion_net = nn.Sequential(
-            nn.Linear(hidden_channels + 1, hidden_channels * 2),  # +1 for time
-            nn.Tanh(),
-            nn.Linear(hidden_channels * 2, hidden_channels),
-            nn.Sigmoid()  # 确保扩散系数为正
+            nn.Linear(1, hidden_channels // 2),  # 时间输入
+            nn.ReLU(),
+            nn.Linear(hidden_channels // 2, hidden_channels),
+            nn.Softplus()  # 确保为正
         )
+        
+        # 稳定性参数
+        self.min_diffusion = nn.Parameter(torch.tensor(0.1))
+        self.max_diffusion = nn.Parameter(torch.tensor(2.0))
         
         # 初始化参数
         self._init_weights()
@@ -49,50 +55,57 @@ class LangevinSDE(BaseSDEModel):
         for module in [self.potential_net, self.diffusion_net]:
             for layer in module:
                 if isinstance(layer, nn.Linear):
-                    nn.init.xavier_uniform_(layer.weight)
+                    nn.init.xavier_uniform_(layer.weight, gain=0.1)
                     nn.init.zeros_(layer.bias)
     
     def f(self, t, y):
         """
-        漂移函数：-∇U(y)
-        Args:
-            t: (batch,) 时间
-            y: (batch, hidden_channels) 状态
-        """
-        y = y.requires_grad_(True)
-        
-        # 计算势能 U(y)
-        potential = self.potential_net(y).sum()  # 对批次求和以便计算梯度
-        
-        # 计算势能梯度 ∇U(y)
-        grad = torch.autograd.grad(
-            outputs=potential, 
-            inputs=y,
-            create_graph=True,
-            retain_graph=True
-        )[0]
-        
-        # 返回 -∇U(y)（负梯度，即势能下降方向）
-        return -grad
-        
-    def g(self, t, y):
-        """
-        扩散函数：σ(t,y)
+        漂移函数：-∇U(y,t) (势能梯度的负值)
         Args:
             t: (batch,) 时间
             y: (batch, hidden_channels) 状态
         """
         batch_size = y.shape[0]
         
-        # 扩展时间维度并与状态连接
+        # 扩展时间维度
         if t.dim() == 0:  # 标量时间
             t_expanded = t.unsqueeze(0).expand(batch_size, 1)
         else:  # 向量时间
             t_expanded = t.view(-1, 1).expand(batch_size, 1)
-        ty = torch.cat([y, t_expanded], dim=1)
         
-        # 计算对角扩散矩阵
-        diffusion = self.diffusion_net(ty)
+        # 计算势能梯度
+        y_input = y.clone().requires_grad_(True)
+        ty = torch.cat([y_input, t_expanded], dim=1)
+        potential = self.potential_net(ty).sum()  # 对batch求和以便计算梯度
+        
+        # 计算梯度 -∇U(y,t)
+        gradient = torch.autograd.grad(potential, y_input, create_graph=True)[0]
+        drift = -gradient  # Langevin漂移是势能梯度的负值
+        
+        return drift
+        
+    def g(self, t, y):
+        """
+        扩散函数：σ(t)
+        Args:
+            t: (batch,) 时间
+            y: (batch, hidden_channels) 状态
+        """
+        batch_size = y.shape[0]
+        
+        # 扩展时间维度
+        if t.dim() == 0:  # 标量时间
+            t_expanded = t.unsqueeze(0).expand(batch_size, 1)
+        else:  # 向量时间
+            t_expanded = t.view(-1, 1).expand(batch_size, 1)
+        
+        # 计算时间相关的扩散系数
+        diffusion = self.diffusion_net(t_expanded)  # (batch, hidden_channels)
+        
+        # 应用稳定性约束
+        min_diff = self.min_diffusion.abs()
+        max_diff = self.max_diffusion.abs()
+        diffusion = torch.clamp(diffusion + min_diff, min_diff, max_diff)
         
         return diffusion
 
@@ -100,9 +113,9 @@ class LangevinSDE(BaseSDEModel):
 class LangevinSDEContiformer(nn.Module):
     """
     Langevin SDE + ContiFormer 完整模型
-    用于光变曲线分类任务
+    用于光变曲线分类任务 - 基于lnsde-contiformer2架构
     """
-    def __init__(self, 
+    def __init__(self,
                  # 数据参数
                  input_dim=3,  # time, mag, errmag
                  num_classes=5,  # 分类数量
@@ -119,9 +132,18 @@ class LangevinSDEContiformer(nn.Module):
                  dt=0.01,
                  rtol=1e-3,
                  atol=1e-4,
-                 # 组件开关参数
-                 use_sde=1,
-                 use_contiformer=1):
+                 # 梯度管理参数
+                 enable_gradient_detach=True,
+                 detach_interval=10,
+                 # 消螏实验参数
+                 use_sde=True,
+                 use_contiformer=True,
+                 # CGA参数
+                 use_cga=False,
+                 cga_group_dim=64,
+                 cga_heads=4,
+                 cga_temperature=0.1,
+                 cga_gate_threshold=0.5):
         super().__init__()
         
         self.input_dim = input_dim
@@ -131,110 +153,82 @@ class LangevinSDEContiformer(nn.Module):
         self.sde_method = sde_method
         self.rtol = rtol
         self.atol = atol
-        self.use_sde = bool(use_sde)
-        self.use_contiformer = bool(use_contiformer)
+        self.use_cga = use_cga
         
-        # 输入特征编码器
-        self.feature_encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_channels),
-            nn.LayerNorm(hidden_channels),
-            nn.ReLU(),
-            nn.Dropout(dropout)
+        # 梯度管理参数
+        self.enable_gradient_detach = enable_gradient_detach
+        self.detach_interval = detach_interval
+        
+        # Langevin SDE模块
+        self.sde_model = LangevinSDE(
+            input_channels=input_dim,
+            hidden_channels=hidden_channels,
+            output_channels=hidden_channels
         )
         
-        # 根据开关创建Langevin SDE模块
-        if self.use_sde:
-            self.sde_model = LangevinSDE(
-                input_channels=input_dim,
-                hidden_channels=hidden_channels, 
-                output_channels=hidden_channels
-            )
-        else:
-            self.sde_model = None
+        # ContiFormer模块
+        self.contiformer = ContiFormerModule(
+            input_dim=hidden_channels,
+            d_model=contiformer_dim,
+            n_heads=n_heads,
+            n_layers=n_layers,
+            dropout=dropout
+        )
         
-        # 根据开关创建ContiFormer模块
-        if self.use_contiformer:
-            self.contiformer = ContiFormerModule(
-                input_dim=hidden_channels,
-                d_model=contiformer_dim,
-                n_heads=n_heads,
-                n_layers=n_layers,
+        # 分类头或CGA分类器
+        if self.use_cga:
+            # 使用CGA增强的分类器
+            self.cga_classifier = CGAClassifier(
+                input_dim=contiformer_dim,
+                num_classes=num_classes,
+                cga_config={
+                    'group_dim': cga_group_dim,
+                    'n_heads': cga_heads,
+                    'temperature': cga_temperature,
+                    'gate_threshold': cga_gate_threshold
+                },
                 dropout=dropout
             )
-            classifier_input_dim = contiformer_dim
+            self.classifier = None
         else:
-            self.contiformer = None
-            classifier_input_dim = hidden_channels
-        
-        # 分类头 - 输入维度根据是否使用ContiFormer动态调整
-        self.classifier = nn.Sequential(
-            nn.Linear(classifier_input_dim, classifier_input_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(classifier_input_dim // 2, num_classes)
-        )
+            # 普通分类头
+            self.cga_classifier = None
+            self.classifier = nn.Sequential(
+                nn.Linear(contiformer_dim, contiformer_dim // 2),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(contiformer_dim // 2, num_classes)
+            )
         
         # Mask处理器
         self.mask_processor = MaskedSequenceProcessor()
         
-    def forward(self, time_series, times, mask=None):
+    def forward(self, time_series, mask=None, return_stability_info=False):
         """
-        前向传播 - 支持模块化组件开关
+        前向传播 - mag/errmag直接注入Langevin SDE
         Args:
             time_series: (batch, seq_len, input_dim) 光变曲线数据 [time, mag, errmag]
-            times: (batch, seq_len) 时间戳
             mask: (batch, seq_len) mask, True表示有效位置
+            return_stability_info: 是否返回稳定性信息
         Returns:
             logits: (batch, num_classes) 分类logits
-            features: (batch, seq_len, hidden_channels) 特征序列
+            sde_features: (batch, seq_len, hidden_channels) SDE特征
         """
         batch_size, seq_len = time_series.shape[:2]
         
-        # 1. 基础特征编码
-        encoded_features = self.feature_encoder(time_series)  # (batch, seq_len, hidden_channels)
+        # 1. 提取时间数据用于SDE建模
+        times = time_series[:, :, 0]  # (batch, seq_len) 时间数据
         
-        # 2. SDE建模（如果启用）
-        if self.use_sde and self.sde_model is not None:
-            sde_features = self._apply_sde_processing(encoded_features, times, mask, seq_len)
-        else:
-            sde_features = encoded_features
-        
-        # 3. 应用mask（如果提供）
-        if mask is not None:
-            sde_features = self.mask_processor.apply_mask(sde_features, mask)
-        
-        # 4. ContiFormer处理（如果启用）
-        if self.use_contiformer and self.contiformer is not None:
-            contiformer_out, pooled_features = self.contiformer(
-                sde_features,
-                times, 
-                mask
-            )
-            final_features = pooled_features
-        else:
-            # 不使用ContiFormer时，直接对特征序列进行全局平均池化
-            if mask is not None:
-                # 考虑mask的平均池化
-                mask_expanded = mask.unsqueeze(-1).expand_as(sde_features)
-                masked_features = sde_features * mask_expanded.float()
-                valid_lengths = mask.sum(dim=1, keepdim=True).float()  # (batch, 1)
-                final_features = masked_features.sum(dim=1) / (valid_lengths + 1e-8)  # (batch, hidden_channels)
-            else:
-                # 简单全局平均池化
-                final_features = sde_features.mean(dim=1)  # (batch, hidden_channels)
-        
-        # 5. 分类
-        logits = self.classifier(final_features)
-        
-        return logits, sde_features
-    
-    def _apply_sde_processing(self, encoded_features, times, mask, seq_len):
-        """
-        应用SDE处理 - 从原始forward函数提取的SDE处理逻辑
-        """
+        # 2. mag/errmag直接注入SDE - 不使用feature_encoder
         sde_trajectory = []
-        current_state = encoded_features[:, 0]  # (batch, hidden_channels) 初始状态
-        sde_solving_count = 0  # 统计实际进行SDE求解的步数
+        
+        # 从第一个时间点开始，逐步求解SDE
+        # 初始状态：将mag/errmag转换为hidden_channels维度
+        initial_features = time_series[:, 0]  # (batch, input_dim)
+        current_state = torch.zeros(batch_size, self.hidden_channels, device=time_series.device)
+        # 将mag/errmag映射到SDE隐藏状态空间
+        current_state[:, :min(self.input_dim, self.hidden_channels)] = initial_features[:, :min(self.input_dim, self.hidden_channels)]
+        sde_solving_count = 0
         
         for i in range(seq_len):
             # 当前时间点
@@ -249,17 +243,16 @@ class LangevinSDEContiformer(nn.Module):
                 
                 # 使用mask来判断是否应该进行SDE求解
                 if mask is not None:
-                    # 检查当前批次中是否有有效的时间点
-                    current_valid = mask[:, i]  # (batch,) 当前时间点的mask
-                    prev_valid = mask[:, i-1]    # (batch,) 前一时间点的mask
-                    batch_has_valid = torch.any(current_valid & prev_valid)  # 是否有样本在两个时间点都有效
+                    current_valid = mask[:, i]
+                    prev_valid = mask[:, i-1]
+                    batch_has_valid = torch.any(current_valid & prev_valid)
                 else:
                     batch_has_valid = True
                 
-                # 检查时间是否递增（使用第一个样本作为参考）
+                # 检查时间是否递增
                 prev_time_val = prev_time[0].item()
                 current_time_val = current_time[0].item()
-                time_increasing = current_time_val > prev_time_val + 1e-8
+                time_increasing = current_time_val > prev_time_val + 1e-6
                 
                 # 决定是否进行SDE求解
                 should_solve_sde = (
@@ -270,127 +263,109 @@ class LangevinSDEContiformer(nn.Module):
                 )
                 
                 if should_solve_sde:
-                    t_solve = torch.stack([prev_time[0], current_time[0]])  # 使用第一个样本的时间作为参考
+                    t_solve = torch.stack([prev_time[0], current_time[0]])
                     
                     try:
-                        # 求解SDE - 批处理版本
+                        # 求解Langevin SDE
                         ys = torchsde.sdeint(
                             sde=self.sde_model,
-                            y0=current_state,  # (batch, hidden_channels)
+                            y0=current_state,
                             ts=t_solve,
                             method=self.sde_method,
                             dt=self.dt,
                             rtol=self.rtol,
                             atol=self.atol
                         )
-                        sde_output = ys[-1]  # (batch, hidden_channels) 取最终时间的结果
+                        sde_output = ys[-1]
                         sde_solving_count += 1
                         
                     except Exception as e:
-                        if sde_solving_count < 5:  # 只在前几次失败时打印
-                            print(f"Langevin SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
-                        sde_output = encoded_features[:, i]
+                        if sde_solving_count < 5:
+                            print(f"Langevin SDE求解失败 (步骤 {i}): {e}, 使用原始特征")
+                        # 当SDE求解失败时，直接使用当前时间点的原始特征
+                        current_features = time_series[:, i]
+                        sde_output = torch.zeros(batch_size, self.hidden_channels, device=time_series.device)
+                        sde_output[:, :min(self.input_dim, self.hidden_channels)] = current_features[:, :min(self.input_dim, self.hidden_channels)]
                 else:
-                    # 使用编码特征
-                    sde_output = encoded_features[:, i]
+                    # 使用当前时间点的原始特征
+                    current_features = time_series[:, i]
+                    sde_output = torch.zeros(batch_size, self.hidden_channels, device=time_series.device)
+                    sde_output[:, :min(self.input_dim, self.hidden_channels)] = current_features[:, :min(self.input_dim, self.hidden_channels)]
             
             # 更新当前状态
             current_state = sde_output
             sde_trajectory.append(sde_output)
         
-        # 重组SDE轨迹为完整序列
+        # 3. 重组SDE轨迹为完整序列
         sde_features = torch.stack(sde_trajectory, dim=1)  # (batch, seq_len, hidden_channels)
-        return sde_features
+        
+        # 4. 应用mask
+        if mask is not None:
+            sde_features = self.mask_processor.apply_mask(sde_features, mask)
+        
+        # 5. ContiFormer处理整个SDE轨迹序列
+        contiformer_out, pooled_features = self.contiformer(
+            sde_features,
+            times, 
+            mask
+        )
+        
+        # 6. 分类 - CGA或普通分类器
+        if self.use_cga and self.cga_classifier is not None:
+            # 使用CGA增强的分类器
+            logits, cga_features, class_representations = self.cga_classifier(contiformer_out, mask)
+        else:
+            # 使用普通分类器
+            logits = self.classifier(pooled_features)
+        
+        if return_stability_info:
+            return logits, sde_features, {'sde_solving_steps': sde_solving_count}
+        else:
+            return logits, sde_features
     
-    def compute_loss(self, logits, labels, sde_features=None, alpha_stability=1e-4, 
-                     weight=None, focal_alpha=0.25, focal_gamma=4.0, label_smoothing=0.3, temperature=0.5):
+    def compute_loss(self, logits, labels, sde_features=None, alpha_stability=1e-3, 
+                     weight=None, focal_alpha=1.0, focal_gamma=2.0, temperature=1.0):
         """
-        超激进反崩塌损失函数
+        改进的损失函数 - 支持数据集特定的超参数
         """
         batch_size, num_classes = logits.shape
         
-        # 0. 温度缩放和动态权重调整
+        # 温度缩放
         scaled_logits = logits / temperature
-        pred_probs = F.softmax(scaled_logits, dim=1)
-        pred_counts = pred_probs.sum(dim=0)
-        dynamic_weights = 1.0 / (pred_counts + 1e-6)
-        dynamic_weights = dynamic_weights / dynamic_weights.sum() * num_classes
         
-        if weight is not None:
-            combined_weights = 0.3 * weight.to(logits.device) + 0.7 * dynamic_weights
-        else:
-            combined_weights = dynamic_weights
-        
-        # 确保权重不需要梯度，避免梯度计算问题
-        combined_weights = combined_weights.detach()
-        
-        # 1. 更强的Focal Loss
-        ce_loss = F.cross_entropy(scaled_logits, labels, weight=combined_weights, reduction='none')
-        pt = torch.exp(-ce_loss)  # pt = p_t
+        # Focal Loss
+        ce_loss = F.cross_entropy(scaled_logits, labels, reduction='none')
+        pt = torch.exp(-ce_loss)
         focal_loss = focal_alpha * (1-pt)**focal_gamma * ce_loss
         focal_loss = focal_loss.mean()
         
-        # 2. 增强标签平滑
-        if label_smoothing > 0:
-            # 创建平滑标签
-            smooth_labels = torch.zeros_like(logits)
-            smooth_labels.fill_(label_smoothing / (num_classes - 1))
-            smooth_labels.scatter_(1, labels.unsqueeze(1), 1.0 - label_smoothing)
-            
-            # KL散度损失
-            log_probs = F.log_softmax(scaled_logits, dim=1)
-            smooth_loss = -torch.sum(smooth_labels * log_probs, dim=1).mean()
-            
-            # 更大权重给标签平滑
-            classification_loss = 0.5 * focal_loss + 0.5 * smooth_loss
-        else:
-            classification_loss = focal_loss
-        
-        # 3. 超强多样性损失
-        pred_mean = pred_probs.mean(dim=0)
-        
-        uniform_target = torch.ones_like(pred_mean) / num_classes
-        uniformity_loss = F.mse_loss(pred_mean, uniform_target) * 2.0
-        
-        # 计算预测熵 - 熵越低说明越集中在单一类别
-        pred_entropy = -torch.sum(pred_mean * torch.log(pred_mean + 1e-10))
-        max_entropy = torch.log(torch.tensor(float(num_classes)))  # 最大熵（均匀分布）
-        entropy_loss = 0.5 * (max_entropy - pred_entropy)
-        
-        diversity_target = torch.ones_like(pred_mean) / num_classes
-        diversity_loss = F.kl_div(pred_mean.log(), diversity_target, reduction='sum') * 0.5
-        
-        # 4. 超严厉惩罚：40%阈值，立方惩罚
-        max_class_ratio = pred_mean.max()
-        if max_class_ratio > 0.4:
-            single_class_penalty = 5.0 * (max_class_ratio - 0.4) ** 3
-        else:
-            single_class_penalty = torch.tensor(0.0, device=logits.device)
-            
-        pred_var = torch.var(pred_mean)
-        ideal_var = (1.0/num_classes) * (1.0 - 1.0/num_classes) / num_classes
-        variance_penalty = 2.0 * torch.abs(pred_var - ideal_var)
-        
-        # 5. 稳定性正则化损失
+        # 稳定性正则化损失
         stability_loss = torch.tensor(0.0, device=logits.device)
         if sde_features is not None and alpha_stability > 0:
-            # L2正则化：鼓励特征平滑
             diff = sde_features[:, 1:] - sde_features[:, :-1]
             stability_loss = alpha_stability * torch.mean(diff ** 2)
         
-        total_loss = (classification_loss + stability_loss + diversity_loss + entropy_loss + 
-                     single_class_penalty + uniformity_loss + variance_penalty)
+        # 轻度信息熵正则化
+        pred_probs = F.softmax(scaled_logits, dim=1)
+        pred_mean = pred_probs.mean(dim=0)
+        pred_entropy = -torch.sum(pred_mean * torch.log(pred_mean + 1e-8))
+        max_entropy = torch.log(torch.tensor(float(num_classes), device=logits.device))
+        entropy_penalty = 0.1 * (max_entropy - pred_entropy)
+        
+        total_loss = focal_loss + stability_loss + entropy_penalty
         
         return total_loss
     
-    def get_stability_loss(self, sde_features, alpha=1e-4):
-        """
-        添加SDE稳定性正则化损失
-        Args:
-            sde_features: (batch, seq_len, hidden_channels)
-            alpha: 正则化系数
-        """
-        # L2正则化：鼓励特征平滑
-        diff = sde_features[:, 1:] - sde_features[:, :-1]
-        stability_loss = alpha * torch.mean(diff ** 2)
-        return stability_loss
+    def get_model_info(self):
+        """获取模型信息"""
+        return {
+            'model_type': 'Langevin SDE + ContiFormer',
+            'sde_type': 'Langevin SDE',
+            'mathematical_form': 'dX_t = -∇U(X_t)dt + σ(t)dW_t',
+            'description': 'Langevin dynamics with neural potential function',
+            'parameters': {
+                'hidden_channels': self.hidden_channels,
+                'contiformer_dim': self.contiformer.d_model,
+                'num_classes': self.num_classes
+            }
+        }

@@ -4,6 +4,9 @@ Base SDE Model class for all Neural SDE architectures
 
 import torch
 import torch.nn as nn
+import sys
+sys.path.append('/root/autodl-tmp/torchsde')
+sys.path.append('/root/autodl-tmp/PhysioPro')
 import torchsde
 from abc import ABC, abstractmethod
 

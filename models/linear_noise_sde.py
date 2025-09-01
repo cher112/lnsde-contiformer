@@ -12,6 +12,7 @@ import torchsde
 
 from .base_sde import BaseSDEModel, MaskedSequenceProcessor
 from .contiformer import ContiFormerModule
+from .cga_module import CGAClassifier
 
 
 class LinearNoiseSDE(BaseSDEModel):
@@ -42,17 +43,16 @@ class LinearNoiseSDE(BaseSDEModel):
             nn.Softplus()  # 确保为正
         )
         
-        # B(t): 时间相关的乘性噪声系数 - 稳定性改进版本
+        # B(t): 时间相关的乘性噪声系数
         self.B_net = nn.Sequential(
             nn.Linear(1, hidden_channels),
             nn.Tanh(),
             nn.Linear(hidden_channels, hidden_channels),
-            nn.Sigmoid()  # 输出[0,1]，防止负乘性噪声导致不稳定
+            nn.Tanh()  # 可以为负，控制增长/衰减
         )
         
-        # 稳定性参数：大幅增强以确保满足稳定性条件 |σ|² > 2L_f
-        self.min_diffusion = nn.Parameter(torch.tensor(1.0))  # 从0.1提升至1.0
-        self.max_diffusion_scale = nn.Parameter(torch.tensor(5.0))  # 扩散项上界控制
+        # 稳定性参数：确保满足稳定性条件 |σ|² > 2L_f
+        self.min_diffusion = nn.Parameter(torch.tensor(0.1))
         
         # 初始化参数
         self._init_weights()
@@ -88,7 +88,7 @@ class LinearNoiseSDE(BaseSDEModel):
         
     def g(self, t, y):
         """
-        扩散函数：A(t) + B(t)y （线性噪声） - 数值稳定性增强版
+        扩散函数：A(t) + B(t)y （线性噪声）
         Args:
             t: (batch,) 时间
             y: (batch, hidden_channels) 状态
@@ -103,20 +103,13 @@ class LinearNoiseSDE(BaseSDEModel):
         
         # 计算 A(t) 和 B(t)
         A_t = self.A_net(t_expanded)  # (batch, hidden_channels)
-        B_t = self.B_net(t_expanded)  # (batch, hidden_channels) - 现在输出[0,1]
+        B_t = self.B_net(t_expanded)  # (batch, hidden_channels)
         
-        # 状态归一化，防止y过大导致数值爆炸
-        y_normalized = torch.clamp(y, -10.0, 10.0)  # 限制状态范围
+        # 线性扩散: A(t) + B(t) * y
+        diffusion = A_t + B_t * y
         
-        # 线性扩散: A(t) + B(t) * y_normalized
-        diffusion = A_t + B_t * y_normalized
-        
-        # 增强的稳定性控制
-        min_diff = self.min_diffusion.abs()  # 最小扩散：1.0
-        max_diff = self.max_diffusion_scale.abs()  # 最大扩散：5.0
-        
-        # 确保扩散项始终为正且在合理范围内
-        diffusion = torch.clamp(diffusion + min_diff, min_diff, max_diff)
+        # 添加最小扩散以确保数值稳定性
+        diffusion = diffusion + self.min_diffusion.abs()
         
         return diffusion
     
@@ -161,13 +154,15 @@ class LinearNoiseSDEContiformer(nn.Module):
                  # 梯度管理参数
                  enable_gradient_detach=True,
                  detach_interval=10,
-                 # 调试参数
-                 debug_mode=False,
-                 # SDE求解优化参数
-                 min_time_interval=0.01,
-                 # 组件开关参数
-                 use_sde=1,
-                 use_contiformer=1):
+                 # 消螏实验参数
+                 use_sde=True,
+                 use_contiformer=True,
+                 # CGA参数
+                 use_cga=False,
+                 cga_group_dim=64,
+                 cga_heads=4,
+                 cga_temperature=0.1,
+                 cga_gate_threshold=0.5):
         super().__init__()
         
         self.input_dim = input_dim
@@ -177,28 +172,17 @@ class LinearNoiseSDEContiformer(nn.Module):
         self.sde_method = sde_method
         self.rtol = rtol
         self.atol = atol
-        self.use_sde = bool(use_sde)
-        self.use_contiformer = bool(use_contiformer)
+        self.use_cga = use_cga
+        
+        # 消螏实验参数
+        self.use_sde = use_sde
+        self.use_contiformer = use_contiformer
         
         # 梯度管理参数
         self.enable_gradient_detach = enable_gradient_detach
         self.detach_interval = detach_interval
         
-        # 调试模式
-        self.debug_mode = debug_mode
-        
-        # SDE求解优化参数
-        self.min_time_interval = min_time_interval
-        
-        # 输入特征编码器
-        self.feature_encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_channels),
-            nn.LayerNorm(hidden_channels),
-            nn.ReLU(),
-            nn.Dropout(dropout)
-        )
-        
-        # 根据开关创建Linear Noise SDE模块
+        # Linear Noise SDE模块 - 可选
         if self.use_sde:
             self.sde_model = LinearNoiseSDE(
                 input_channels=input_dim,
@@ -207,8 +191,10 @@ class LinearNoiseSDEContiformer(nn.Module):
             )
         else:
             self.sde_model = None
+            # 不使用SDE时，直接使用线性映射
+            self.direct_mapping = nn.Linear(input_dim, hidden_channels)
         
-        # 根据开关创建ContiFormer模块
+        # ContiFormer模块 - 可选
         if self.use_contiformer:
             self.contiformer = ContiFormerModule(
                 input_dim=hidden_channels,
@@ -217,18 +203,38 @@ class LinearNoiseSDEContiformer(nn.Module):
                 n_layers=n_layers,
                 dropout=dropout
             )
-            classifier_input_dim = contiformer_dim
         else:
             self.contiformer = None
-            classifier_input_dim = hidden_channels
+            # 不使用ContiFormer时，使用简单的全局平均池化
+            self.global_pool = nn.AdaptiveAvgPool1d(1)
         
-        # 分类头 - 输入维度根据是否使用ContiFormer动态调整
-        self.classifier = nn.Sequential(
-            nn.Linear(classifier_input_dim, classifier_input_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(classifier_input_dim // 2, num_classes)
-        )
+        # 分类头或CGA分类器
+        # 决定输入维度
+        classifier_input_dim = contiformer_dim if self.use_contiformer else hidden_channels
+        
+        if self.use_cga:
+            # 使用CGA增强的分类器
+            self.cga_classifier = CGAClassifier(
+                input_dim=classifier_input_dim,
+                num_classes=num_classes,
+                cga_config={
+                    'group_dim': cga_group_dim,
+                    'n_heads': cga_heads,
+                    'temperature': cga_temperature,
+                    'gate_threshold': cga_gate_threshold
+                },
+                dropout=dropout
+            )
+            self.classifier = None
+        else:
+            # 普通分类头
+            self.cga_classifier = None
+            self.classifier = nn.Sequential(
+                nn.Linear(classifier_input_dim, classifier_input_dim // 2),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(classifier_input_dim // 2, num_classes)
+            )
         
         # Mask处理器
         self.mask_processor = MaskedSequenceProcessor()
@@ -236,86 +242,85 @@ class LinearNoiseSDEContiformer(nn.Module):
         # 稳定性监控
         self.stability_history = []
         
-    def forward(self, time_series, times, mask=None, return_stability_info=False):
+    def forward(self, time_series, mask=None, return_stability_info=False):
         """
-        前向传播 - 支持模块化组件开关
+        前向传播 - 支持消螏实验的批处理
         Args:
             time_series: (batch, seq_len, input_dim) 光变曲线数据 [time, mag, errmag]
-            times: (batch, seq_len) 时间戳
             mask: (batch, seq_len) mask, True表示有效位置
             return_stability_info: 是否返回稳定性信息
         Returns:
             logits: (batch, num_classes) 分类logits
-            features: (batch, seq_len, hidden_channels) 特征序列
+            features: (batch, seq_len, hidden_channels) 特征
             stability_info: 稳定性信息（可选）
         """
         batch_size, seq_len = time_series.shape[:2]
         
-        # 1. 基础特征编码
-        encoded_features = self.feature_encoder(time_series)  # (batch, seq_len, hidden_channels)
+        # 1. 提取时间数据
+        times = time_series[:, :, 0]  # (batch, seq_len) 时间数据
         
-        # 2. SDE建模（如果启用）
-        if self.use_sde and self.sde_model is not None:
-            sde_features, stability_info = self._apply_sde_processing(
-                encoded_features, times, mask, seq_len, return_stability_info
-            )
+        # 2. 特征提取 - 根据消螏实验设置
+        if self.use_sde:
+            # 使用SDE进行特征提取
+            features, stability_info = self._forward_with_sde(time_series, times, mask, return_stability_info)
         else:
-            sde_features = encoded_features
-            stability_info = []
+            # 不使用SDE，直接映射
+            features = self._forward_without_sde(time_series)
+            stability_info = {'sde_solving_steps': 0}
         
-        # 3. 应用mask（如果提供）
+        # 3. 应用mask
         if mask is not None:
-            sde_features = self.mask_processor.apply_mask(sde_features, mask)
+            features = self.mask_processor.apply_mask(features, mask)
         
-        # 4. ContiFormer处理（如果启用）
-        if self.use_contiformer and self.contiformer is not None:
+        # 4. ContiFormer处理或简单池化
+        if self.use_contiformer:
             contiformer_out, pooled_features = self.contiformer(
-                sde_features,
+                features,
                 times, 
                 mask
             )
-            final_features = pooled_features
+            final_features = contiformer_out
         else:
-            # 不使用ContiFormer时，直接对特征序列进行全局平均池化
+            # 不使用ContiFormer，直接进行全局平均池化
             if mask is not None:
-                # 考虑mask的平均池化
-                mask_expanded = mask.unsqueeze(-1).expand_as(sde_features)
-                masked_features = sde_features * mask_expanded.float()
-                valid_lengths = mask.sum(dim=1, keepdim=True).float()  # (batch, 1)
-                final_features = masked_features.sum(dim=1) / (valid_lengths + 1e-8)  # (batch, hidden_channels)
+                # 考虑mask的池化
+                masked_features = features * mask.unsqueeze(-1)
+                pooled_features = masked_features.sum(dim=1) / mask.sum(dim=1, keepdim=True).clamp(min=1)
             else:
-                # 简单全局平均池化
-                final_features = sde_features.mean(dim=1)  # (batch, hidden_channels)
+                pooled_features = features.mean(dim=1)
+            final_features = features
         
-        # 5. 分类
-        logits = self.classifier(final_features)
+        # 5. 分类 - CGA或普通分类器
+        if self.use_cga and self.cga_classifier is not None:
+            # 使用CGA增强的分类器
+            logits, cga_features, class_representations = self.cga_classifier(final_features, mask)
+        else:
+            # 使用普通分类器
+            logits = self.classifier(pooled_features)
         
         if return_stability_info:
-            return logits, sde_features, {
-                'stability_margins': stability_info,
-                'mean_stability': sum(stability_info) / len(stability_info) if stability_info else 0.0,
-                'sde_solving_steps': len(stability_info)
-            }
+            return logits, features, stability_info
         else:
-            return logits, sde_features
+            return logits, features
     
-    def _apply_sde_processing(self, encoded_features, times, mask, seq_len, return_stability_info):
-        """
-        应用SDE处理 - 从原始forward函数提取的SDE处理逻辑
-        """
+    def _forward_with_sde(self, time_series, times, mask, return_stability_info):
+        """使用SDE进行特征提取"""
+        batch_size, seq_len = time_series.shape[:2]
+        
         sde_trajectory = []
         stability_info = []
         
-        # 从第一个时间点开始，逐步求解SDE
-        current_state = encoded_features[:, 0]  # (batch, hidden_channels) 初始状态
-        sde_solving_count = 0  # 统计实际进行SDE求解的步数
+        # 初始状态：将mag/errmag转换为hidden_channels维度
+        initial_features = time_series[:, 0]  # (batch, input_dim)
+        current_state = torch.zeros(batch_size, self.hidden_channels, device=time_series.device)
+        current_state[:, :min(self.input_dim, self.hidden_channels)] = initial_features[:, :min(self.input_dim, self.hidden_channels)]
+        sde_solving_count = 0
         
         for i in range(seq_len):
-            # 当前时间点
-            current_time = times[:, i]  # (batch,)
+            current_time = times[:, i]
             
             # 检查稳定性条件
-            if return_stability_info:
+            if return_stability_info and hasattr(self.sde_model, 'get_stability_condition'):
                 try:
                     stability_margin = self.sde_model.get_stability_condition(current_time, current_state)
                     stability_info.append(stability_margin)
@@ -323,77 +328,73 @@ class LinearNoiseSDEContiformer(nn.Module):
                     stability_info.append(0.0)
             
             if i == 0:
-                # 第一个时间点直接使用初始状态
                 sde_output = current_state
             else:
-                # 从上一个状态求解到当前时间
                 prev_time = times[:, i-1]
                 
-                # 使用mask来判断是否应该进行SDE求解
+                # 检查是否应该进行SDE求解
                 if mask is not None:
-                    # 检查当前批次中是否有有效的时间点
-                    current_valid = mask[:, i]  # (batch,) 当前时间点的mask
-                    prev_valid = mask[:, i-1]    # (batch,) 前一时间点的mask
-                    batch_has_valid = torch.any(current_valid & prev_valid)  # 是否有样本在两个时间点都有效
+                    current_valid = mask[:, i]
+                    prev_valid = mask[:, i-1]
+                    batch_has_valid = torch.any(current_valid & prev_valid)
                 else:
                     batch_has_valid = True
                 
-                # 检查时间是否递增且间隔足够大（使用第一个样本作为参考）
                 prev_time_val = prev_time[0].item()
                 current_time_val = current_time[0].item()
                 time_increasing = current_time_val > prev_time_val + 1e-6
-                time_interval_sufficient = (current_time_val - prev_time_val) >= self.min_time_interval
                 
-                # 决定是否进行SDE求解
                 should_solve_sde = (
                     batch_has_valid and 
                     time_increasing and
-                    time_interval_sufficient and  # 新增时间间隔检查
                     prev_time_val > 0 and 
                     current_time_val > 0
                 )
                 
                 if should_solve_sde:
-                    t_solve = torch.stack([prev_time[0], current_time[0]])  # 使用第一个样本的时间作为参考
+                    t_solve = torch.stack([prev_time[0], current_time[0]])
                     
                     try:
-                        # 求解SDE - 使用高精度配置保持准确性
-                        if self.debug_mode:
-                            print(f"    开始SDE求解: t={prev_time[0].item():.3f} → {current_time[0].item():.3f}")
+                        import torchsde
                         ys = torchsde.sdeint(
                             sde=self.sde_model,
-                            y0=current_state,  # (batch, hidden_channels)
+                            y0=current_state,
                             ts=t_solve,
-                            method=self.sde_method,  # 使用原始配置的method (milstein)
-                            dt=min(self.dt, 0.005),  # 使用更小的步长保证精度
-                            rtol=self.rtol,  # 使用原始的高精度容差
-                            atol=self.atol,  # 使用原始的高精度容差
-                            options={
-                                'norm': torch.norm,  # 使用L2范数进行误差估计
-                                'jump_t': None,      # 避免不连续时间点
-                                'adaptive': True     # 启用自适应步长
-                            }
+                            method=self.sde_method,
+                            dt=self.dt,
+                            rtol=self.rtol,
+                            atol=self.atol
                         )
-                        sde_output = ys[-1]  # (batch, hidden_channels) 取最终时间的结果
+                        sde_output = ys[-1]
                         sde_solving_count += 1
-                        if self.debug_mode:
-                            print(f"    SDE求解成功，输出range: [{sde_output.min().item():.3f}, {sde_output.max().item():.3f}]")
-                        
                     except Exception as e:
-                        if self.debug_mode and sde_solving_count < 5:  # 调试模式下显示失败信息
-                            print(f"Linear Noise SDE求解失败 (步骤 {i}): {e}, 使用编码特征")
-                        sde_output = encoded_features[:, i]
+                        if sde_solving_count < 5:
+                            print(f"Linear Noise SDE求解失败 (步骤 {i}): {e}, 使用原始特征")
+                        current_features = time_series[:, i]
+                        sde_output = torch.zeros(batch_size, self.hidden_channels, device=time_series.device)
+                        sde_output[:, :min(self.input_dim, self.hidden_channels)] = current_features[:, :min(self.input_dim, self.hidden_channels)]
                 else:
-                    # 使用编码特征
-                    sde_output = encoded_features[:, i]
+                    current_features = time_series[:, i]
+                    sde_output = torch.zeros(batch_size, self.hidden_channels, device=time_series.device)
+                    sde_output[:, :min(self.input_dim, self.hidden_channels)] = current_features[:, :min(self.input_dim, self.hidden_channels)]
             
-            # 更新当前状态
             current_state = sde_output
             sde_trajectory.append(sde_output)
         
-        # 重组SDE轨迹为完整序列
-        sde_features = torch.stack(sde_trajectory, dim=1)  # (batch, seq_len, hidden_channels)
-        return sde_features, stability_info
+        features = torch.stack(sde_trajectory, dim=1)
+        stability_info_dict = {
+            'stability_margins': stability_info,
+            'mean_stability': sum(stability_info) / len(stability_info) if stability_info else 0.0,
+            'sde_solving_steps': sde_solving_count
+        }
+        
+        return features, stability_info_dict
+        
+    def _forward_without_sde(self, time_series):
+        """不使用SDE，直接映射特征"""
+        # 直接将输入映射到hidden_channels维度
+        features = self.direct_mapping(time_series)  # (batch, seq_len, hidden_channels)
+        return features
     
     def compute_loss(self, logits, labels, sde_features=None, alpha_stability=1e-3, 
                      weight=None, focal_alpha=1.0, focal_gamma=2.0, temperature=1.0):

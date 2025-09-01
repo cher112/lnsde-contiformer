@@ -6,6 +6,10 @@ import os
 import time
 import torch
 from torch.cuda.amp import GradScaler
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, classification_report
+import seaborn as sns
 
 from .system_utils import clear_gpu_memory
 from .model_utils import save_checkpoint, setup_model_save_paths
@@ -126,15 +130,36 @@ class TrainingManager:
         except Exception as e:
             print(f"❌ 生成可视化图表时出错: {e}")
         
+        # 生成完整数据集的混淆矩阵
+        print("=== 生成混淆矩阵 ===")
+        try:
+            self._generate_confusion_matrix()
+        except Exception as e:
+            print(f"❌ 生成混淆矩阵时出错: {e}")
+        
         return best_val_acc
     
     def _save_checkpoints(self, epoch, val_loss, val_acc, best_val_acc):
-        """保存模型检查点"""
+        """保存模型检查点 - 使用详细参数命名"""
+        # 生成详细的模型名称
+        model_name_parts = [
+            self.args.dataset_name,
+            self.args.model_type,
+            f"sde{'1' if self.args.use_sde else '0'}",
+            f"cf{'1' if self.args.use_contiformer else '0'}", 
+            f"cga{'1' if self.args.use_cga else '0'}",
+            f"hc{self.args.hidden_channels}",
+            f"cd{self.args.contiformer_dim}",
+            f"lr{self.args.learning_rate:.0e}",
+            f"bs{self.args.batch_size}"
+        ]
+        base_model_name = "_".join(model_name_parts)
+        
         # 定期保存epoch模型
         if (epoch + 1) % self.args.save_interval == 0:
             epoch_save_path = os.path.join(
                 self.model_save_dir,
-                f"{self.args.dataset_name}_{self.args.model_type}_epoch_{epoch + 1}.pth"
+                f"{base_model_name}_epoch{epoch + 1}.pth"
             )
             save_checkpoint(self.model, self.optimizer, epoch, val_loss, val_acc, epoch_save_path)
         
@@ -142,7 +167,7 @@ class TrainingManager:
         if val_acc > best_val_acc:
             best_save_path = os.path.join(
                 self.model_save_dir,
-                f"{self.args.dataset_name}_{self.args.model_type}_best.pth"
+                f"{base_model_name}_best.pth"
             )
             
             # 添加模型参数到检查点
@@ -162,8 +187,147 @@ class TrainingManager:
                     'dt': self.args.dt,
                     'rtol': self.args.rtol,
                     'atol': self.args.atol,
+                    'use_sde': self.args.use_sde,
+                    'use_contiformer': self.args.use_contiformer,
+                    'use_cga': self.args.use_cga
+                },
+                'training_params': {
+                    'learning_rate': self.args.learning_rate,
+                    'batch_size': self.args.batch_size,
+                    'epochs': self.args.epochs,
+                    'dataset': self.args.dataset_name
                 }
             }
             
             torch.save(checkpoint, best_save_path)
-            print(f"✅ 保存最佳模型: {best_save_path}")
+            print(f"✅ 保存最佳模型: {best_save_path}")    
+    def _generate_confusion_matrix(self):
+        """生成完整数据集的混淆矩阵"""
+        print("正在生成混淆矩阵...")
+        
+        # 设置模型为评估模式
+        self.model.eval()
+        
+        all_predictions = []
+        all_labels = []
+        
+        # 在完整数据集（训练+验证）上评估
+        datasets = [("Train", self.train_loader), ("Val", self.val_loader)]
+        
+        with torch.no_grad():
+            for dataset_name, dataloader in datasets:
+                for batch in dataloader:
+                    if isinstance(batch, dict):
+                        features = batch["features"].to(self.device)
+                        labels = batch["labels"].to(self.device)
+                        mask = batch.get("mask", None)
+                        if mask is not None:
+                            mask = mask.to(self.device)
+                    else:
+                        features, labels = batch
+                        features = features.to(self.device)
+                        labels = labels.to(self.device)
+                        mask = None
+                    
+                    # 前向传播
+                    if self.args.model_type in ["linear_noise", "langevin", "geometric"]:
+                        outputs, _ = self.model(features, mask)
+                    else:
+                        outputs = self.model(features)
+                    
+                    predictions = torch.argmax(outputs, dim=1)
+                    all_predictions.extend(predictions.cpu().numpy())
+                    all_labels.extend(labels.cpu().numpy())
+        
+        # 转换为numpy数组
+        y_true = np.array(all_labels)
+        y_pred = np.array(all_predictions)
+        
+        # 获取类别名称
+        class_names = self._get_class_names()
+        
+        # 生成混淆矩阵
+        cm = confusion_matrix(y_true, y_pred)
+        
+        # 配置中文字体
+        self._configure_chinese_font()
+        
+        # 绘制混淆矩阵
+        plt.figure(figsize=(12, 10))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", 
+                   xticklabels=class_names, yticklabels=class_names)
+        plt.title(f"{self.args.dataset_name} - 混淆矩阵\n"
+                 f"模型: {self.args.model_type} | "
+                 f"SDE: {\"On\" if self.args.use_sde else \"Off\"} | "
+                 f"ContiFormer: {\"On\" if self.args.use_contiformer else \"Off\"} | "
+                 f"CGA: {\"On\" if self.args.use_cga else \"Off\"}")
+        plt.xlabel("预测类别")
+        plt.ylabel("真实类别")
+        
+        # 保存混淆矩阵
+        model_name_parts = [
+            self.args.dataset_name,
+            self.args.model_type,
+            f"sde{'1' if self.args.use_sde else '0'}",
+            f"cf{'1' if self.args.use_contiformer else '0'}", 
+            f"cga{'1' if self.args.use_cga else '0'}",
+            f"hc{self.args.hidden_channels}",
+            f"cd{self.args.contiformer_dim}"
+        ]
+        base_name = "_".join(model_name_parts)
+        
+        matrix_filename = f"{base_name}_confusion_matrix.png"
+        matrix_path = os.path.join(self.args.save_dir, matrix_filename)
+        plt.tight_layout()
+        plt.savefig(matrix_path, dpi=300, bbox_inches="tight")
+        plt.close()
+        
+        print(f"✅ 混淆矩阵已保存: {matrix_path}")
+        
+        # 生成分类报告
+        report = classification_report(y_true, y_pred, target_names=class_names, output_dict=True)
+        report_filename = f"{base_name}_classification_report.txt"
+        report_path = os.path.join(self.args.save_dir, report_filename)
+        
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(f"{self.args.dataset_name} 分类报告\n")
+            f.write(f"模型: {self.args.model_type}\n")
+            f.write(f"SDE: {\"On\" if self.args.use_sde else \"Off\"}\n")
+            f.write(f"ContiFormer: {\"On\" if self.args.use_contiformer else \"Off\"}\n")
+            f.write(f"CGA: {\"On\" if self.args.use_cga else \"Off\"}\n\n")
+            f.write(classification_report(y_true, y_pred, target_names=class_names))
+        
+        print(f"✅ 分类报告已保存: {report_path}")
+        
+        # 计算总体指标
+        accuracy = (y_true == y_pred).mean()
+        print(f"总体准确率: {accuracy:.4f}")
+        print(f"加权F1分数: {report[\"weighted avg\"][\"f1-score\"]:.4f}")
+        print(f"宏平均F1分数: {report[\"macro avg\"][\"f1-score\"]:.4f}")
+    
+    def _get_class_names(self):
+        """获取类别名称"""
+        if self.args.dataset_name == "ASAS":
+            return ["Beta_Persei", "RR_Lyrae_FM", "W_Ursae_Maj"]
+        elif self.args.dataset_name == "LINEAR":
+            return ["Beta_Persei", "Delta_Scuti", "RR_Lyrae_FM", "RR_Lyrae_FO", "W_Ursae_Maj"]
+        elif self.args.dataset_name == "MACHO":
+            return ["Beta_Persei", "Delta_Scuti", "RR_Lyrae_FM", "RR_Lyrae_FO", "W_Ursae_Maj"]
+        else:
+            # 默认类别名称
+            return [f"Class_{i}" for i in range(self.model.num_classes)]
+    
+    def _configure_chinese_font(self):
+        """配置中文字体显示"""
+        import matplotlib.font_manager as fm
+        
+        # 添加字体到matplotlib管理器
+        try:
+            fm.fontManager.addfont("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc")
+            fm.fontManager.addfont("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc")
+        except:
+            pass
+        
+        # 设置中文字体优先级列表
+        plt.rcParams["font.sans-serif"] = ["WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "DejaVu Sans"]
+        plt.rcParams["axes.unicode_minus"] = False

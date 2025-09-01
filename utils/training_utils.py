@@ -29,22 +29,27 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
     accumulated_loss = 0.0
     
     for batch_idx, batch in pbar:
-        # 数据移动到设备 - 转换为3维features格式
-        x = batch['x'].to(device)  # (batch, seq_len, 2) [time, mag]
+        # 数据移动到设备 - 处理不同的键名格式
+        if 'features' in batch:
+            # 重采样数据格式: features键包含完整的3维数据 [time, mag, errmag]
+            features = batch['features'].to(device)  # (batch, seq_len, 3)
+            times = features[:, :, 0]  # 提取时间维度
+        elif 'x' in batch:
+            # 原始数据格式: x键包含2维数据 [time, mag]，需要添加errmag
+            x = batch['x'].to(device)  # (batch, seq_len, 2) [time, mag]
+            batch_size, seq_len = x.shape[0], x.shape[1]
+            errmag = torch.zeros(batch_size, seq_len, 1, device=device)
+            features = torch.cat([x, errmag], dim=2)  # (batch, seq_len, 3)
+            times = x[:, :, 0]  # 提取时间维度
+        else:
+            raise KeyError("批次数据中未找到'features'或'x'键")
+            
         y = batch['labels'].to(device)
         mask = batch['mask'].to(device)
         
-        # 将2维x转换为3维features [time, mag, errmag] 
-        batch_size, seq_len = x.shape[0], x.shape[1]
-        errmag = torch.zeros(batch_size, seq_len, 1, device=device)
-        features = torch.cat([x, errmag], dim=2)  # (batch, seq_len, 3)
+        periods = batch['periods'].cpu().numpy() if 'periods' in batch else torch.zeros(features.shape[0]).cpu().numpy()
         
-        # 正确提取时间数据：从x的第一个维度
-        times = x[:, :, 0]  # (batch, seq_len) 真实的时间序列
-        
-        periods = batch['periods'].cpu().numpy()
-        
-        batch_size = x.size(0)
+        batch_size = features.size(0)
         
         # 混合精度训练
         if scaler is not None:
@@ -88,6 +93,13 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
                 scaler.update()
                 optimizer.zero_grad()
                 
+                # 保存当前累积损失用于显示
+                batch_loss = accumulated_loss * gradient_accumulation_steps
+                # 重置累积损失以准备下一轮累积
+                accumulated_loss = 0.0
+            else:
+                batch_loss = loss.item() * gradient_accumulation_steps
+                
         else:
             # 普通训练 - 也支持梯度累积
             if model_type == 'geometric':
@@ -127,9 +139,18 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 optimizer.zero_grad()
+                
+                # 保存当前累积损失用于显示
+                batch_loss = accumulated_loss * gradient_accumulation_steps
+                # 重置累积损失以准备下一轮累积
+                accumulated_loss = 0.0
+            else:
+                batch_loss = loss.item() * gradient_accumulation_steps
         
-        # 统计 - 使用原始损失（不是缩放后的）
-        total_loss += accumulated_loss * gradient_accumulation_steps if (batch_idx + 1) % gradient_accumulation_steps == 0 else 0
+        # 统计 - 使用保存的批次损失
+        if 'batch_loss' in locals():
+            total_loss += batch_loss
+        
         _, predicted = torch.max(logits.data, 1)
         total += y.size(0)
         correct += (predicted == y).sum().item()
@@ -145,7 +166,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, model_type, d
         
         # 计算当前指标
         current_acc = 100. * correct / total
-        current_loss = accumulated_loss * gradient_accumulation_steps if (batch_idx + 1) % gradient_accumulation_steps == 0 else loss.item()
+        current_loss = batch_loss if 'batch_loss' in locals() else 0.0
         
         # 实时更新进度条显示Loss和Acc
         pbar.set_postfix({
@@ -198,20 +219,25 @@ def validate_epoch(model, val_loader, criterion, device, model_type, dataset_con
     
     with torch.no_grad():
         for batch in pbar:
-            # 数据移动到设备
-            x = batch['x'].to(device)  # (batch, seq_len, 2) [time, mag] 
+            # 数据移动到设备 - 处理不同的键名格式
+            if 'features' in batch:
+                # 重采样数据格式: features键包含完整的3维数据 [time, mag, errmag]
+                features = batch['features'].to(device)  # (batch, seq_len, 3)
+                times = features[:, :, 0]  # 提取时间维度
+            elif 'x' in batch:
+                # 原始数据格式: x键包含2维数据 [time, mag]，需要添加errmag
+                x = batch['x'].to(device)  # (batch, seq_len, 2) [time, mag]
+                batch_size, seq_len = x.shape[0], x.shape[1]
+                errmag = torch.zeros(batch_size, seq_len, 1, device=device)
+                features = torch.cat([x, errmag], dim=2)  # (batch, seq_len, 3)
+                times = x[:, :, 0]  # 提取时间维度
+            else:
+                raise KeyError("批次数据中未找到'features'或'x'键")
+                
             y = batch['labels'].to(device)
             mask = batch['mask'].to(device)
             
-            # 将2维x转换为3维features [time, mag, errmag]
-            batch_size, seq_len = x.shape[0], x.shape[1]
-            errmag = torch.zeros(batch_size, seq_len, 1, device=device)
-            features = torch.cat([x, errmag], dim=2)  # (batch, seq_len, 3)
-            
-            # 正确提取时间数据：从x的第一个维度
-            times = x[:, :, 0]  # (batch, seq_len) 真实的时间序列
-            
-            periods = batch['periods'].cpu().numpy()
+            periods = batch['periods'].cpu().numpy() if 'periods' in batch else torch.zeros(features.shape[0]).cpu().numpy()
             
             # 前向传播
             if model_type == 'geometric':

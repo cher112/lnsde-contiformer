@@ -38,16 +38,24 @@ def create_model(model_type, num_classes, args, dataset_config):
         'rtol': args.rtol,
         'atol': args.atol,
         'use_sde': args.use_sde,
-        'use_contiformer': args.use_contiformer
+        'use_contiformer': args.use_contiformer,
+        'use_cga': args.use_cga
     }
+    
+    # 添加CGA参数
+    if args.use_cga:
+        model_configs.update({
+            'cga_group_dim': args.cga_group_dim,
+            'cga_heads': args.cga_heads,
+            'cga_temperature': args.cga_temperature,
+            'cga_gate_threshold': args.cga_gate_threshold
+        })
     
     # 为Linear Noise SDE添加梯度管理参数
     if model_type == 'linear_noise':
         model_configs.update({
             'enable_gradient_detach': dataset_config['enable_gradient_detach'],
-            'detach_interval': args.detach_interval,
-            'debug_mode': getattr(args, 'debug_mode', False),  # 添加调试模式参数，默认为False
-            'min_time_interval': dataset_config.get('min_time_interval', 0.01)  # 添加时间间隔参数
+            'detach_interval': args.detach_interval
         })
     
     if model_type == 'langevin':
@@ -57,6 +65,10 @@ def create_model(model_type, num_classes, args, dataset_config):
             print("  - SDE组件: 已禁用")
         if args.use_contiformer == 0:
             print("  - ContiFormer组件: 已禁用")
+        if args.use_cga == 1:
+            print("  - CGA组件: 已启用")
+        else:
+            print("  - CGA组件: 已禁用")
         
     elif model_type == 'linear_noise':
         model = LinearNoiseSDEContiformer(**model_configs)
@@ -65,6 +77,13 @@ def create_model(model_type, num_classes, args, dataset_config):
             print("  - SDE组件: 已禁用")
         if args.use_contiformer == 0:
             print("  - ContiFormer组件: 已禁用")
+        if args.use_cga == 1:
+            print("  - CGA组件: 已启用")
+            print(f"    * 组维度: {args.cga_group_dim}")
+            print(f"    * 注意力头数: {args.cga_heads}")
+            print(f"    * 温度参数: {args.cga_temperature}")
+        else:
+            print("  - CGA组件: 已禁用")
         print(f"  - 梯度断开: {dataset_config['enable_gradient_detach']}")
         print(f"  - 断开间隔: {args.detach_interval}")
         
@@ -75,6 +94,10 @@ def create_model(model_type, num_classes, args, dataset_config):
             print("  - SDE组件: 已禁用")
         if args.use_contiformer == 0:
             print("  - ContiFormer组件: 已禁用")
+        if args.use_cga == 1:
+            print("  - CGA组件: 已启用")
+        else:
+            print("  - CGA组件: 已禁用")
         
     else:
         raise ValueError(f"未知模型类型: {model_type}")

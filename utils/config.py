@@ -7,8 +7,8 @@ def get_dataset_specific_params(dataset_id, args):
     # LINEAR 数据集配置
     if dataset_id == 2:  # LINEAR
         config = {
-            'temperature': 0.8,
-            'focal_gamma': 3.0,
+            'temperature': 0.8,  # v1.0原始参数
+            'focal_gamma': 3.0,  # v1.0原始参数
             'enable_gradient_detach': False,
             'min_time_interval': 0.005,  # LINEAR相对稀疏，中等优化
         }
@@ -170,7 +170,7 @@ def setup_sde_config(sde_config_id, args):
 
 def setup_dataset_mapping(args):
     """设置数据集映射和模型类型映射"""
-    # 数据集映射 - 现在主数据文件已修复
+    # 数据集映射 - 使用autodl-fs/lnsde-contiformer/data路径
     dataset_mapping = {
         1: ('/root/autodl-fs/lnsde-contiformer/data/ASAS_folded_512_fixed.pkl', 'ASAS'),    # 使用修复后的数据
         2: ('/root/autodl-fs/lnsde-contiformer/data/LINEAR_folded_512_fixed.pkl', 'LINEAR'), # 使用修复后的数据
