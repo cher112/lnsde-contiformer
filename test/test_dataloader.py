@@ -14,7 +14,7 @@ train_loader, test_loader, num_classes = create_dataloaders(
     data_path=data_path,
     batch_size=2,
     num_workers=0,
-    random_seed=42
+    random_seed=535411460
 )
 
 # 获取一个批次

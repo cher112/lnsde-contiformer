@@ -85,37 +85,17 @@ class LightCurveDataset(Dataset):
                 errmags = item['errmag'].astype(np.float32)
                 period = np.float32(item['period'])
                 
-                # 获取有效的时间点和数据
-                valid_indices = mask
-                valid_times = times[valid_indices]
-                valid_mags = mags[valid_indices]
-                valid_errmags = errmags[valid_indices]
+                # 原版数据已经处理过-1e9，直接使用
+                # mask标记了有效数据，无需额外处理
                 
-                # 按时间排序
-                sort_indices = np.argsort(valid_times)
-                sorted_times = valid_times[sort_indices]
-                sorted_mags = valid_mags[sort_indices]
-                sorted_errmags = valid_errmags[sort_indices]
+                # 直接使用原始数据
+                padded_times = times
+                padded_mags = mags
+                padded_errmags = errmags
+                padded_mask = mask
                 
-                # 确保时间严格递增（去除重复时间点）
-                unique_indices = np.diff(sorted_times, prepend=-np.inf) > 1e-6
-                final_times = sorted_times[unique_indices]
-                final_mags = sorted_mags[unique_indices]
-                final_errmags = sorted_errmags[unique_indices]
-                
-                actual_length = len(final_times)
-                
-                # Padding到固定长度
-                max_len = len(times)
-                padded_times = np.zeros(max_len, dtype=np.float32)
-                padded_mags = np.zeros(max_len, dtype=np.float32)
-                padded_errmags = np.zeros(max_len, dtype=np.float32)
-                padded_mask = np.zeros(max_len, dtype=bool)
-                
-                padded_times[:actual_length] = final_times
-                padded_mags[:actual_length] = final_mags
-                padded_errmags[:actual_length] = final_errmags
-                padded_mask[:actual_length] = True
+                # 计算实际有效长度
+                actual_length = np.sum(mask)
                 
                 # 构建预处理后的数据项
                 processed_item = {
@@ -364,6 +344,9 @@ def create_dataloaders(data_path: str,
                       test_ratio: float = 0.2,
                       normalize: bool = False,  # 默认关闭归一化，因为数据已经folded
                       num_workers: int = 8,
+                      pin_memory: bool = True,  # 添加pin_memory参数
+                      prefetch_factor: int = 2,  # 添加prefetch_factor参数
+                      persistent_workers: bool = True,  # 保持workers活跃
                       random_seed: int = 42) -> Tuple[DataLoader, DataLoader, int]:
     """
     创建训练、测试数据加载器（80-20分割）
@@ -411,11 +394,13 @@ def create_dataloaders(data_path: str,
     if num_workers > 0:
         loader_kwargs.update({
             'num_workers': num_workers,
-            'persistent_workers': True,  # 保持worker进程，减少重启开销
-            'prefetch_factor': 8,        # 增加预取批次数
+            'persistent_workers': persistent_workers,  # 使用参数值
+            'prefetch_factor': prefetch_factor,        # 使用参数值
+            'pin_memory': pin_memory and torch.cuda.is_available()  # 仅在CUDA可用时使用
         })
     else:
         loader_kwargs['num_workers'] = 0
+        loader_kwargs['pin_memory'] = False
     
     train_loader = DataLoader(
         train_dataset,

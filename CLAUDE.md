@@ -143,6 +143,103 @@ source /etc/network_turbo
 - 确保大型文件传输的可靠性
 - 减少网络超时和连接失败
 
+## 数据集格式说明
+
+### 数据文件位置
+- **原始数据**: `/root/autodl-fs/lnsde-contiformer/data/`
+- **重采样数据**: `/root/autodl-fs/lnsde-contiformer/data/resampled/`
+
+### 数据格式（pkl文件）
+**MACHO/LINEAR/ASAS数据集统一格式**：
+
+```python
+# 数据结构：List[Dict]
+data = [
+    {
+        'time': np.ndarray,      # 时间序列 (n,)
+        'mag': np.ndarray,       # 幅值序列 (n,)
+        'errmag': np.ndarray,    # 误差序列 (n,)
+        'mask': np.ndarray,      # 有效数据mask (n,)
+        'period': float,         # 周期
+        'label': int,            # 类别标签 (0-6)
+        'file_id': str,          # 文件ID
+        'original_length': int,  # 原始长度
+        'valid_points': int,     # 有效点数
+        'coverage': float,       # 覆盖率
+        'class_name': str        # 类别名称
+    },
+    ...
+]
+
+# 类别映射（MACHO数据集）
+classes = {
+    0: 'Be',    # 128样本
+    1: 'CEPH',  # 101样本  
+    2: 'EB',    # 255样本
+    3: 'LPV',   # 365样本
+    4: 'MOA',   # 582样本
+    5: 'QSO',   # 59样本
+    6: 'RRL'    # 610样本
+}
+```
+
+### 数据加载示例
+```python
+import pickle
+import numpy as np
+
+# 加载数据
+with open('/root/autodl-fs/lnsde-contiformer/data/MACHO_original.pkl', 'rb') as f:
+    data = pickle.load(f)
+
+# 访问数据
+for sample in data:
+    times = sample['time']     # 时间点
+    mags = sample['mag']        # 星等值
+    errors = sample['errmag']   # 测量误差
+    label = sample['label']     # 类别标签
+    class_name = sample['class_name']  # 类别名称
+```
+
+### 数据特点
+- **时间序列长度不一**: 每个样本的观测点数不同
+- **不规则采样**: 时间间隔不均匀
+- **存在缺失值**: 使用mask标记有效数据
+- **类别不平衡**: QSO(59) vs MOA(582) vs RRL(610)
+
+### 常见数据问题
+- **零误差值**: 约15.8%的样本包含零误差
+- **非递增时间**: 约15.8%的样本时间序列有问题
+- **无NaN/Inf**: 原始数据质量良好，无异常值
+
+## NaN Loss问题解决方案
+
+### 问题诊断
+1. **数据本身无NaN/Inf** - 原始数据质量良好
+2. **简化模型运行稳定** - 禁用SDE/ContiFormer后正常
+3. **SDE组件导致NaN** - 数值求解不稳定
+
+### 推荐解决步骤
+```bash
+# 1. 最简配置测试（禁用所有高级特性）
+python main.py --use_sde 0 --use_contiformer 0 --use_cga 0 --epochs 1 --batch_size 16
+
+# 2. 逐步启用组件
+python main.py --use_sde 1 --use_contiformer 0 --use_cga 0 --epochs 1 --batch_size 16
+
+# 3. 启用数值稳定性措施
+python main.py --use_optimization --gradient_clip 1.0 --label_smoothing 0.1 --epochs 1
+
+# 4. 调整学习率和模型规模
+python main.py --learning_rate 1e-5 --hidden_channels 64 --batch_size 16 --epochs 1
+```
+
+### 关键参数调整
+- **学习率**: 降至1e-5（Lion优化器敏感）
+- **梯度裁剪**: gradient_clip=1.0
+- **SDE配置**: dt=0.1, rtol=1e-3, atol=1e-4
+- **模型规模**: hidden_channels=64（调试用）
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
@@ -151,3 +248,4 @@ NEVER proactively create documentation files (*.md) or README files. Only create
 - to memorize
 - to memorize
 - to memorize
+- 把功能实现的md放到docs文件夹

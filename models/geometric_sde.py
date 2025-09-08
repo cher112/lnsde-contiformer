@@ -133,11 +133,11 @@ class GeometricSDEContiformer(nn.Module):
                  n_layers=4,
                  # 训练参数
                  dropout=0.1,
-                 # SDE求解参数
+                 # SDE求解参数 - 优化以减少内存使用
                  sde_method='euler',
-                 dt=0.01,
-                 rtol=1e-3,
-                 atol=1e-4,
+                 dt=0.05,           # 增大时间步长，减少求解步数
+                 rtol=1e-2,         # 放松相对容差，减少迭代次数
+                 atol=1e-3,         # 放松绝对容差，减少计算复杂度
                  # 梯度管理参数
                  enable_gradient_detach=True,
                  detach_interval=10,
@@ -161,31 +161,48 @@ class GeometricSDEContiformer(nn.Module):
         self.atol = atol
         self.use_cga = use_cga
         
+        # 消融实验参数
+        self.use_sde = use_sde
+        self.use_contiformer = use_contiformer
+        
         # 梯度管理参数
         self.enable_gradient_detach = enable_gradient_detach
         self.detach_interval = detach_interval
         
-        # Geometric SDE模块
-        self.sde_model = GeometricSDE(
-            input_channels=input_dim,
-            hidden_channels=hidden_channels,
-            output_channels=hidden_channels
-        )
+        # Geometric SDE模块 - 可选
+        if self.use_sde:
+            self.sde_model = GeometricSDE(
+                input_channels=input_dim,
+                hidden_channels=hidden_channels,
+                output_channels=hidden_channels
+            )
+        else:
+            self.sde_model = None
+            # 不使用SDE时，直接使用线性映射
+            self.direct_mapping = nn.Linear(input_dim, hidden_channels)
         
-        # ContiFormer模块
-        self.contiformer = ContiFormerModule(
-            input_dim=hidden_channels,
-            d_model=contiformer_dim,
-            n_heads=n_heads,
-            n_layers=n_layers,
-            dropout=dropout
-        )
+        # ContiFormer模块 - 可选
+        if self.use_contiformer:
+            self.contiformer = ContiFormerModule(
+                input_dim=hidden_channels,
+                d_model=contiformer_dim,
+                n_heads=n_heads,
+                n_layers=n_layers,
+                dropout=dropout
+            )
+        else:
+            self.contiformer = None
+            # 不使用ContiFormer时，使用简单的全局平均池化
+            self.global_pool = nn.AdaptiveAvgPool1d(1)
         
         # 分类头或CGA分类器
+        # 决定输入维度
+        classifier_input_dim = contiformer_dim if self.use_contiformer else hidden_channels
+        
         if self.use_cga:
             # 使用CGA增强的分类器
             self.cga_classifier = CGAClassifier(
-                input_dim=contiformer_dim,
+                input_dim=classifier_input_dim,
                 num_classes=num_classes,
                 cga_config={
                     'group_dim': cga_group_dim,
@@ -200,10 +217,10 @@ class GeometricSDEContiformer(nn.Module):
             # 普通分类头
             self.cga_classifier = None
             self.classifier = nn.Sequential(
-                nn.Linear(contiformer_dim, contiformer_dim // 2),
+                nn.Linear(classifier_input_dim, classifier_input_dim // 2),
                 nn.ReLU(),
                 nn.Dropout(dropout),
-                nn.Linear(contiformer_dim // 2, num_classes)
+                nn.Linear(classifier_input_dim // 2, num_classes)
             )
         
         # Mask处理器
@@ -211,21 +228,72 @@ class GeometricSDEContiformer(nn.Module):
         
     def forward(self, time_series, mask=None, return_stability_info=False):
         """
-        前向传播 - mag/errmag直接注入Geometric SDE
+        前向传播 - 支持消融实验的批处理
         Args:
             time_series: (batch, seq_len, input_dim) 光变曲线数据 [time, mag, errmag]
             mask: (batch, seq_len) mask, True表示有效位置
             return_stability_info: 是否返回稳定性信息
         Returns:
             logits: (batch, num_classes) 分类logits
-            sde_features: (batch, seq_len, hidden_channels) SDE特征
         """
         batch_size, seq_len = time_series.shape[:2]
         
-        # 1. 提取时间数据用于SDE建模
+        # 1. 提取时间数据
         times = time_series[:, :, 0]  # (batch, seq_len) 时间数据
         
-        # 2. mag/errmag直接注入SDE - 不使用feature_encoder
+        # 2. 特征提取 - 根据消融实验设置
+        if self.use_sde:
+            # 使用SDE进行特征提取
+            features, stability_info = self._forward_with_sde(time_series, times, mask, return_stability_info)
+        else:
+            # 不使用SDE，直接映射
+            features = self._forward_without_sde(time_series)
+            stability_info = {'sde_solving_steps': 0}
+        
+        # 3. 应用mask
+        if mask is not None:
+            features = self.mask_processor.apply_mask(features, mask)
+        
+        # 4. ContiFormer处理或简单池化
+        if self.use_contiformer:
+            contiformer_out, pooled_features = self.contiformer(
+                features,
+                times, 
+                mask
+            )
+            final_features = contiformer_out
+        else:
+            # 不使用ContiFormer，直接进行全局平均池化
+            if mask is not None:
+                # 修复除零问题 - 添加eps
+                masked_features = features * mask.unsqueeze(-1)
+                mask_sum = mask.sum(dim=1, keepdim=True).float()  # (batch, 1)
+                eps = 1e-8
+                pooled_features = torch.where(
+                    mask_sum > eps,
+                    masked_features.sum(dim=1) / mask_sum.clamp(min=eps),
+                    features.mean(dim=1)  # fallback到普通均值
+                )
+            else:
+                pooled_features = features.mean(dim=1)
+            final_features = features
+        
+        # 5. 分类 - CGA或普通分类器
+        if self.use_cga and self.cga_classifier is not None:
+            # 使用CGA增强的分类器
+            logits, _, _ = self.cga_classifier(final_features, mask)
+        else:
+            # 使用普通分类器
+            logits = self.classifier(pooled_features)
+        
+        # 只返回logits，不返回tuple
+        return logits
+    
+    def _forward_with_sde(self, time_series, times, mask, return_stability_info):
+        """使用Geometric SDE进行特征提取"""
+        batch_size, seq_len = time_series.shape[:2]
+        
+        # mag/errmag直接注入SDE - 不使用feature_encoder
         sde_trajectory = []
         
         # 从第一个时间点开始，逐步求解SDE
@@ -298,7 +366,7 @@ class GeometricSDEContiformer(nn.Module):
                         current_features = time_series[:, i]
                         sde_output = torch.ones(batch_size, self.hidden_channels, device=time_series.device) * 0.1
                         sde_output[:, :min(self.input_dim, self.hidden_channels)] = torch.clamp(
-                            current_features[:, :min(self.input_dim, self.hidden_channels)], 
+                            current_features[:, :min(self.input_dim, self.hidden_channels)],
                             min=0.01, max=10.0
                         )
                 else:
@@ -306,7 +374,7 @@ class GeometricSDEContiformer(nn.Module):
                     current_features = time_series[:, i]
                     sde_output = torch.ones(batch_size, self.hidden_channels, device=time_series.device) * 0.1
                     sde_output[:, :min(self.input_dim, self.hidden_channels)] = torch.clamp(
-                        current_features[:, :min(self.input_dim, self.hidden_channels)], 
+                        current_features[:, :min(self.input_dim, self.hidden_channels)],
                         min=0.01, max=10.0
                     )
             
@@ -314,32 +382,20 @@ class GeometricSDEContiformer(nn.Module):
             current_state = sde_output
             sde_trajectory.append(sde_output)
         
-        # 3. 重组SDE轨迹为完整序列
+        # 重组SDE轨迹为完整序列
         sde_features = torch.stack(sde_trajectory, dim=1)  # (batch, seq_len, hidden_channels)
-        
-        # 4. 应用mask
-        if mask is not None:
-            sde_features = self.mask_processor.apply_mask(sde_features, mask)
-        
-        # 5. ContiFormer处理整个SDE轨迹序列
-        contiformer_out, pooled_features = self.contiformer(
-            sde_features,
-            times, 
-            mask
-        )
-        
-        # 6. 分类 - CGA或普通分类器
-        if self.use_cga and self.cga_classifier is not None:
-            # 使用CGA增强的分类器
-            logits, cga_features, class_representations = self.cga_classifier(contiformer_out, mask)
-        else:
-            # 使用普通分类器
-            logits = self.classifier(pooled_features)
-        
-        if return_stability_info:
-            return logits, sde_features, {'sde_solving_steps': sde_solving_count}
-        else:
-            return logits, sde_features
+        stability_info = {'sde_solving_steps': sde_solving_count}
+        return sde_features, stability_info
+    
+    def _forward_without_sde(self, time_series):
+        """不使用SDE，直接映射特征"""
+        # 直接使用线性映射处理所有时间步
+        batch_size, seq_len, input_dim = time_series.shape
+        # 重塑为 (batch * seq_len, input_dim)，然后映射，再重塑回来
+        flat_series = time_series.view(-1, input_dim)
+        flat_features = self.direct_mapping(flat_series)
+        features = flat_features.view(batch_size, seq_len, self.hidden_channels)
+        return features
     
     def compute_loss(self, logits, labels, sde_features=None, alpha_stability=1e-3, 
                      weight=None, focal_alpha=1.0, focal_gamma=2.0, temperature=1.0):

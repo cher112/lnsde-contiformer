@@ -9,8 +9,8 @@ import numpy as np
 from utils.resampling import HybridResampler
 
 # 创建简单的测试数据
-np.random.seed(42)
-torch.manual_seed(42)
+np.random.seed(535411460)
+torch.manual_seed(535411460)
 
 # 创建不平衡数据
 n_samples_per_class = [100, 50, 25]  # 类别0:100, 类别1:50, 类别2:25
@@ -43,7 +43,7 @@ resampler = HybridResampler(
     enn_n_neighbors=3,
     sampling_strategy='balanced',
     apply_enn=True,
-    random_state=42
+    random_state=535411460
 )
 
 # 执行重采样

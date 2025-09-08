@@ -53,7 +53,7 @@ def resample_dataset(dataset_name, batch_size=64, apply_enn=True):  # 默认启�
         data_path=data_path,
         batch_size=batch_size,
         num_workers=4,
-        random_seed=42
+        random_seed=535411460
     )
     
     # 提取训练数据
@@ -88,7 +88,7 @@ def resample_dataset(dataset_name, batch_size=64, apply_enn=True):  # 默认启�
         enn_n_neighbors=3,
         sampling_strategy='balanced',  # 完全平衡
         apply_enn=apply_enn,  # 启用ENN欠采样
-        random_state=42
+        random_state=535411460
     )
     
     # 执行重采样
@@ -171,7 +171,7 @@ def create_comparison_plot():
                 enn_n_neighbors=3,
                 sampling_strategy='balanced',
                 apply_enn=True,  # 启用ENN
-                random_state=42
+                random_state=535411460
             )
             
             # 加载数据 - 使用fixed版本
@@ -185,7 +185,7 @@ def create_comparison_plot():
                 data_path=data_path,
                 batch_size=64,
                 num_workers=4,
-                random_seed=42
+                random_seed=535411460
             )
             
             # 提取数据

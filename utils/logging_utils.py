@@ -61,6 +61,9 @@ def setup_logging(timestamp_dir, dataset_name, model_type, sde_config, args=None
         'sde_config': sde_config,
         'start_time': timestamp,
         'date': date_str,
+        'best_epoch': 0,  # 当前最佳epoch
+        'best_val_acc': 0.0,  # 当前最佳验证准确率
+        'best_timestamp': None,  # 最佳准确率达成时间
         'epochs': []
     }
     
@@ -78,7 +81,8 @@ def update_log(log_path, log_data, epoch, train_loss, train_acc, val_loss, val_a
         'train_acc': float(train_acc),
         'val_loss': float(val_loss),
         'val_acc': float(val_acc),
-        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'is_best': is_best  # 标记是否为最佳epoch
     }
     
     # 添加训练额外指标 (加权平均)
@@ -91,12 +95,15 @@ def update_log(log_path, log_data, epoch, train_loss, train_acc, val_loss, val_a
         epoch_data['val_f1'] = float(val_metrics['f1_score'])  # 加权平均F1
         epoch_data['val_recall'] = float(val_metrics['recall'])  # 加权平均Recall
         
-        # 如果有混淆矩阵，也保存它
-        if 'confusion_matrix' in val_metrics and val_metrics['confusion_matrix']:
-            epoch_data['confusion_matrix'] = val_metrics['confusion_matrix']
+        # 每个epoch都保存混淆矩阵（如果存在）
+        if 'confusion_matrix' in val_metrics and val_metrics['confusion_matrix'] is not None:
+            cm = val_metrics['confusion_matrix']
+            # 对于numpy数组，检查是否有元素且不全为0
+            if hasattr(cm, 'size') and cm.size > 0:
+                epoch_data['confusion_matrix'] = cm.tolist()  # 转为列表便于JSON序列化
     
-    # 只在最优批次记录class_accuracies
-    if class_accuracies is not None and is_best:
+    # 每个epoch都记录class_accuracies（如果存在）
+    if class_accuracies is not None:
         epoch_data['class_accuracies'] = {k: float(v) for k, v in class_accuracies.items()}
     
     if total_time is not None:
@@ -105,7 +112,16 @@ def update_log(log_path, log_data, epoch, train_loss, train_acc, val_loss, val_a
     if lr is not None:
         epoch_data['learning_rate'] = float(lr)
     
+    # 更新最佳epoch记录
+    if is_best:
+        log_data['best_epoch'] = epoch
+        log_data['best_val_acc'] = float(val_acc)
+        log_data['best_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     log_data['epochs'].append(epoch_data)
+    
+    # 确保日志目录存在
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
     
     # 保存日志文件
     with open(log_path, 'w', encoding='utf-8') as f:
@@ -113,21 +129,28 @@ def update_log(log_path, log_data, epoch, train_loss, train_acc, val_loss, val_a
 
 
 def print_epoch_summary(epoch, total_epochs, train_loss, train_acc, val_loss, val_acc, 
-                       class_accuracies=None, epoch_time=None, lr=None, train_metrics=None, val_metrics=None):
+                       class_accuracies=None, epoch_time=None, lr=None, train_metrics=None, val_metrics=None, best_epoch=None):
     """打印训练轮次总结"""
     print(f"\nEpoch [{epoch}/{total_epochs}] 总结:")
     
     # 训练指标
     train_info = f"  训练 - Loss: {train_loss:.4f}, Acc: {train_acc:.2f}%"
     if train_metrics:
-        train_info += f", 加权F1: {train_metrics['f1_score']:.1f}, 加权Recall: {train_metrics['recall']:.1f}"
+        train_info += f", 加权F1: {train_metrics['f1_score']*100:.1f}%, 加权Recall: {train_metrics['recall']*100:.1f}%"
     print(train_info)
     
     # 验证指标
     val_info = f"  验证 - Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%"
     if val_metrics:
-        val_info += f", 加权F1: {val_metrics['f1_score']:.1f}, 加权Recall: {val_metrics['recall']:.1f}"
+        val_info += f", 加权F1: {val_metrics['f1_score']*100:.1f}%, 加权Recall: {val_metrics['recall']*100:.1f}%"
     print(val_info)
+    
+    # 显示最佳epoch信息
+    if best_epoch is not None and best_epoch > 0:
+        if epoch == best_epoch:
+            print(f"  🎉 新的最佳验证准确率: {val_acc:.2f}% (Epoch {best_epoch})")
+        else:
+            print(f"  📊 当前最佳: Epoch {best_epoch}")
     
     if lr is not None:
         print(f"  学习率: {lr:.2e}")
@@ -135,7 +158,21 @@ def print_epoch_summary(epoch, total_epochs, train_loss, train_acc, val_loss, va
     if epoch_time is not None:
         print(f"  耗时: {epoch_time:.1f}s")
     
-    if class_accuracies is not None:
+    if val_metrics and 'confusion_matrix' in val_metrics and val_metrics['confusion_matrix'] is not None:
+        confusion_matrix = val_metrics['confusion_matrix']
+        # 确保是有效的矩阵
+        if hasattr(confusion_matrix, 'shape') and confusion_matrix.size > 0:
+            print("  混淆矩阵:")
+            num_classes = confusion_matrix.shape[0]
+            
+            # 直接打印n*n矩阵，每行缩进4个空格
+            for i in range(num_classes):
+                print("    ", end="")
+                for j in range(num_classes):
+                    print(f"{confusion_matrix[i, j]:>4}", end=" ")
+                print()
+    elif class_accuracies is not None:
+        # 备用显示：如果没有混淆矩阵，仍显示各类别准确率
         print("  各类别准确率:")
         for class_name, acc in class_accuracies.items():
             print(f"    {class_name}: {acc:.2f}%")

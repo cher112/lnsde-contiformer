@@ -21,7 +21,7 @@ train_loader, test_loader, num_classes = create_dataloaders(
     data_path=data_path,
     batch_size=64,
     num_workers=0,
-    random_seed=42
+    random_seed=535411460
 )
 
 # 提取训练数据
@@ -50,7 +50,7 @@ resampler = HybridResampler(
     enn_n_neighbors=3,
     sampling_strategy='balanced',
     apply_enn=True,  # 显式启用ENN
-    random_state=42
+    random_state=535411460
 )
 
 # 执行重采样

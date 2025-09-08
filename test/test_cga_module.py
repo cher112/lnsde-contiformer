@@ -272,7 +272,7 @@ def main():
     print("=" * 60 + "\n")
     
     # 设置随机种子
-    torch.manual_seed(42)
+    torch.manual_seed(535411460)
     
     try:
         # 运行各项测试

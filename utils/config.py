@@ -9,7 +9,7 @@ def get_dataset_specific_params(dataset_id, args):
         config = {
             'temperature': 0.8,  # v1.0原始参数
             'focal_gamma': 3.0,  # v1.0原始参数
-            'enable_gradient_detach': False,
+            'enable_gradient_detach': True,  # 统一启用梯度断开，确保稳定性
             'min_time_interval': 0.005,  # LINEAR相对稀疏，中等优化
         }
         print("=== LINEAR 数据集配置 ===")
@@ -42,8 +42,9 @@ def get_dataset_specific_params(dataset_id, args):
         config['temperature'] = args.temperature
     if args.focal_gamma is not None:
         config['focal_gamma'] = args.focal_gamma
-    if args.enable_gradient_detach:
-        config['enable_gradient_detach'] = True
+    # 修复梯度断开参数逻辑 - 只有显式禁用时才关闭
+    if hasattr(args, 'enable_gradient_detach') and not args.enable_gradient_detach:
+        config['enable_gradient_detach'] = False
     if args.min_time_interval is not None:
         config['min_time_interval'] = args.min_time_interval
     
@@ -170,12 +171,56 @@ def setup_sde_config(sde_config_id, args):
 
 def setup_dataset_mapping(args):
     """设置数据集映射和模型类型映射"""
-    # 数据集映射 - 使用autodl-fs/lnsde-contiformer/data路径
-    dataset_mapping = {
-        1: ('/root/autodl-fs/lnsde-contiformer/data/ASAS_folded_512_fixed.pkl', 'ASAS'),    # 使用修复后的数据
-        2: ('/root/autodl-fs/lnsde-contiformer/data/LINEAR_folded_512_fixed.pkl', 'LINEAR'), # 使用修复后的数据
-        3: ('/root/autodl-fs/lnsde-contiformer/data/MACHO_folded_512_fixed.pkl', 'MACHO')   # 使用修复后的数据
-    }
+    # 数据集映射 - 根据数据版本参数选择
+    if hasattr(args, 'use_resampling') and args.use_resampling:
+        # 使用重采样数据集
+        if hasattr(args, 'resampled_data_path') and args.resampled_data_path:
+            # 使用指定的重采样数据路径
+            if args.dataset == 3:  # MACHO
+                dataset_mapping = {
+                    3: (args.resampled_data_path, 'MACHO_TimeGAN')
+                }
+                print(f"📊 使用指定的物理约束TimeGAN重采样数据: {args.resampled_data_path}")
+            else:
+                # 其他数据集使用标准重采样数据
+                dataset_mapping = {
+                    1: ('/root/autodl-fs/lnsde-contiformer/data/ASAS_resampled.pkl', 'ASAS'),
+                    2: ('/root/autodl-fs/lnsde-contiformer/data/LINEAR_resampled.pkl', 'LINEAR'),
+                    3: (args.resampled_data_path, 'MACHO_TimeGAN')
+                }
+                print(f"📊 使用指定的重采样数据: {args.resampled_data_path}")
+        else:
+            # 自动选择重采样数据
+            dataset_mapping = {
+                1: ('/root/autodl-fs/lnsde-contiformer/data/ASAS_resampled.pkl', 'ASAS'),
+                2: ('/root/autodl-fs/lnsde-contiformer/data/LINEAR_resampled.pkl', 'LINEAR'),
+                3: ('/root/autodl-fs/lnsde-contiformer/data/macho_resample_timegan.pkl', 'MACHO_TimeGAN')  # 默认使用TimeGAN
+            }
+            print("📊 使用重采样数据集 - MACHO使用物理约束TimeGAN重采样")
+    elif hasattr(args, 'use_enhanced') and args.use_enhanced:
+        # 使用增强数据集
+        dataset_mapping = {
+            1: ('/root/autodl-fs/lnsde-contiformer/data/ASAS_enhanced.pkl', 'ASAS'),
+            2: ('/root/autodl-fs/lnsde-contiformer/data/LINEAR_enhanced.pkl', 'LINEAR'),
+            3: ('/root/autodl-fs/lnsde-contiformer/data/MACHO_enhanced.pkl', 'MACHO')
+        }
+        print("📊 使用增强数据集(enhanced) - 包含恢复样本和SMOTE生成")
+    elif hasattr(args, 'use_original') and args.use_original:
+        # 使用原始完整数据
+        dataset_mapping = {
+            1: ('/root/autodl-fs/lnsde-contiformer/data/ASAS_original.pkl', 'ASAS'),
+            2: ('/root/autodl-fs/lnsde-contiformer/data/LINEAR_original.pkl', 'LINEAR'),
+            3: ('/root/autodl-fs/lnsde-contiformer/data/MACHO_original.pkl', 'MACHO')
+        }
+        print("📊 使用原始完整数据集(original)")
+    else:
+        # 默认使用fixed数据
+        dataset_mapping = {
+            1: ('/root/autodl-fs/lnsde-contiformer/data/ASAS_fixed.pkl', 'ASAS'),
+            2: ('/root/autodl-fs/lnsde-contiformer/data/LINEAR_fixed.pkl', 'LINEAR'),
+            3: ('/root/autodl-fs/lnsde-contiformer/data/MACHO_fixed.pkl', 'MACHO')
+        }
+        print("📊 使用修复后数据集(fixed)")
     
     # 模型类型映射
     model_type_mapping = {

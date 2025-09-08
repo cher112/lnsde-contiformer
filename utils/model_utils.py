@@ -51,6 +51,11 @@ def create_model(model_type, num_classes, args, dataset_config):
             'cga_gate_threshold': args.cga_gate_threshold
         })
     
+    # 添加GPU优化参数
+    model_configs.update({
+        'use_gradient_checkpoint': getattr(args, 'use_gradient_checkpoint', False)
+    })
+    
     # 为Linear Noise SDE添加梯度管理参数
     if model_type == 'linear_noise':
         model_configs.update({
@@ -157,10 +162,13 @@ def load_model_checkpoint(model, optimizer, args, load_type):
         checkpoint_path = latest_path
         
     elif load_type == 2:  # 加载最好
-        # 递归搜索best模型
+        # 递归搜索best模型 - 支持新旧文件名格式
         for root, _, files in os.walk("./results"):
             for file in files:
-                if file == f"{args.dataset_name}_{args.model_type}_best.pth":
+                # 旧格式: ASAS_linear_noise_best.pth
+                # 新格式: ASAS_linear_noise_sde1_cf1_cga1_hc128_cd256_lr1e-04_bs50_best.pth
+                if (file.startswith(f"{args.dataset_name}_{args.model_type}") and 
+                    file.endswith('_best.pth')):
                     full_path = os.path.join(root, file)
                     potential_paths.append(full_path)
         
@@ -198,8 +206,8 @@ def load_model_checkpoint(model, optimizer, args, load_type):
                     param_mismatch = True
             
             if param_mismatch:
-                print("模型参数不匹配，从头开始训练")
-                return 0.0, 0
+                print("⚠️ 模型参数不匹配，但尝试部分加载（架构兼容模式）")
+                # 不直接返回，继续尝试加载模型状态
         
         # 加载模型状态 - 处理架构不匹配的情况
         try:

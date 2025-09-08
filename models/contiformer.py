@@ -215,16 +215,22 @@ class ContiFormerModule(nn.Module):
             return self._forward_custom(x, times, mask)
     
     def _forward_custom(self, x, times, mask):
-        """自定义前向传播"""
+        """自定义前向传播 - 支持梯度检查点"""
         # 时间位置编码
         time_enc = self.pos_encoding(times)
         x = x + time_enc
         x = self.dropout(x)
         
-        # 逐层处理
+        # 逐层处理 - 支持梯度检查点
         attentions = []
         for layer in self.layers:
-            x, attention = layer(x, time_enc, mask)
+            if hasattr(self, 'use_gradient_checkpoint') and self.use_gradient_checkpoint:
+                # 使用梯度检查点节省内存
+                x, attention = torch.utils.checkpoint.checkpoint(
+                    layer, x, time_enc, mask, use_reentrant=False
+                )
+            else:
+                x, attention = layer(x, time_enc, mask)
             attentions.append(attention)
         
         # 池化：获取最后有效位置的输出
@@ -232,8 +238,22 @@ class ContiFormerModule(nn.Module):
             # 找到每个序列的最后有效位置
             seq_lengths = mask.sum(dim=1) - 1
             seq_lengths = seq_lengths.clamp(min=0)
+            
+            # 检查是否有完全无效的序列（全为padding）
+            valid_sequences = mask.sum(dim=1) > 0
             batch_indices = torch.arange(x.size(0), device=x.device)
-            pooled = x[batch_indices, seq_lengths]
+            
+            # 对于有效序列，取最后有效位置；对于无效序列，取均值池化
+            pooled = torch.zeros(x.size(0), x.size(2), device=x.device)
+            if valid_sequences.any():
+                valid_batch_indices = batch_indices[valid_sequences]
+                valid_seq_lengths = seq_lengths[valid_sequences]
+                pooled[valid_sequences] = x[valid_batch_indices, valid_seq_lengths]
+            
+            # 对于无效序列，使用均值池化作为fallback
+            if not valid_sequences.all():
+                invalid_mask = ~valid_sequences
+                pooled[invalid_mask] = x[invalid_mask].mean(dim=1)
         else:
             pooled = x[:, -1]  # 使用最后一个时间步
         

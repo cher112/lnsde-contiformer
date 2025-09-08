@@ -25,7 +25,7 @@ def evaluate_model(model_path, data_path, dataset_name, model_name):
             data_path=data_path, 
             batch_size=64, 
             num_workers=4,
-            random_seed=42
+            random_seed=535411460
         )
         
         print(f"数据集: {dataset_name}")
