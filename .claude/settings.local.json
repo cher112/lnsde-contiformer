@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{print $9, \"\"\"\"(\"\"\"\" $5 \"\"\"\")\"\"\"\"}')",
+      "WebSearch",
+      "Bash(git init:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
